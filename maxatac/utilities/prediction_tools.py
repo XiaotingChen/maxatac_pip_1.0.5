@@ -307,13 +307,22 @@ def make_stranded_predictions(roi_pool: pd.DataFrame,
                               input_channels: int =INPUT_CHANNELS,
                               input_length: int =INPUT_LENGTH):
 
+
+    # Get the roi pools on only the chromosomes specified
+
     chr_roi_pool = roi_pool[roi_pool["chr"] == chromosome].copy()
 
     logging.error("Load pre-trained model")
 
     nn_model = load_model(model, compile=False)
 
+
+    # Checking the log error file, it shows that this log appears after the log above displays a lot of times
+    # So I think what happened is that because this make_stranded_predictions is wrapped around a Pool multiprocessing,
+    # All of the trained TF models for all chrs are loaded first before it starts going to the generator
     logging.error("Start Prediction Generator")
+
+    # This returns a numpy array
 
     data_generator = PredictionDataGenerator(signal=signal,
                                              sequence=sequence,
@@ -325,9 +334,15 @@ def make_stranded_predictions(roi_pool: pd.DataFrame,
     
     logging.error("Making predictions")
 
+
+    # The output of the neural network is a 32-element vector, so predictions.shape maybe = (batch_size, 32) or (1000, 32)
+
     predictions = nn_model.predict(data_generator)
   
     logging.error("Parsing results into pandas dataframe")
+
+
+    # predictions_df has 32 columns and 1000 rows
 
     predictions_df = pd.DataFrame(data=predictions, index=None, columns=None)
     

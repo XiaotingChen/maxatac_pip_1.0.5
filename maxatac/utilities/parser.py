@@ -23,6 +23,8 @@ with Mute():
     from maxatac.analyses.threshold import run_thresholding
     from maxatac.analyses.data import run_data
 
+
+from maxatac.utilities.phuc_utilities import phuc_func
 from maxatac.utilities.constants import (DEFAULT_TRAIN_VALIDATE_CHRS,
                                          LOG_LEVELS,
                                          DEFAULT_LOG_LEVEL,
@@ -92,6 +94,30 @@ def get_parser():
                                 )
 
     #############################################
+
+    # My subparser
+    #############################################
+    phuc_parser = subparsers.add_parser("phuc", parents=[parent_parser], help="Run Phuc's functions")
+    phuc_parser.set_defaults(func=phuc_func)
+    phuc_parser.add_argument("--summary", type=str, default="", required=False, help="Run a model.summary()")
+    phuc_parser.add_argument("--metafile_data_dir", type=str, default="", required=False, help="Create a meta file for model training")
+    phuc_parser.add_argument("--debug_plot_model", type=str, default="", required=False, help="Debug plot_model function")
+    phuc_parser.add_argument("--debug_forward_pass_model", type=str, default="", required=False, 
+                            help="Perform a forward pass to ensure the model works. Options for model: DCNN_V2, DCNN_V2_attention, Transformer"
+                            )
+    phuc_parser.add_argument("--ablation_random_genome_file", type=str, default="", required=False,
+                            help="Perform ablation study on the genome"
+                            )
+    phuc_parser.add_argument("--loglevel",
+                                dest="loglevel",
+                                type=str,
+                                default=LOG_LEVELS[DEFAULT_LOG_LEVEL],
+                                choices=LOG_LEVELS.keys(),
+                                help="Logging level. Default: " + DEFAULT_LOG_LEVEL
+                                )
+
+    #############################################
+
     # Data subparser
     #############################################
     data_parser = subparsers.add_parser("data",
@@ -217,6 +243,15 @@ def get_parser():
                                 help="Genome sequence hg38.2bit file."
                                 )
 
+
+    predict_parser.add_argument("--multiprocessing",
+                                dest="multiprocessing",
+                                type=bool,
+                                default=True,
+                                help="Whether to run multiprocessing"
+                                )
+
+
     predict_parser.add_argument("-i", "-s", "--signal",
                                 dest="signal",
                                 type=str,
@@ -329,6 +364,14 @@ def get_parser():
     train_parser.set_defaults(func=run_training)
 
     # Add arguments to the parser
+
+    train_parser.add_argument("--phuc_generate_np_from_train",
+                              type=str,
+                              default="",
+                              help="An option to generate numpy arrays from input data to train. If this option is not None then the model will not be trained"
+                              )
+
+
     train_parser.add_argument("--sequence",
                               dest="sequence",
                               type=str,
