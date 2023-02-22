@@ -22,7 +22,7 @@ with Mute():
     from maxatac.utilities.constants import KERNEL_INITIALIZER, INPUT_LENGTH, INPUT_CHANNELS, INPUT_FILTERS, \
         INPUT_KERNEL_SIZE, INPUT_ACTIVATION, OUTPUT_FILTERS, OUTPUT_KERNEL_SIZE, FILTERS_SCALING_FACTOR, DILATION_RATE, \
         OUTPUT_LENGTH, CONV_BLOCKS, PADDING, POOL_SIZE, ADAM_BETA_1, ADAM_BETA_2, DEFAULT_ADAM_LEARNING_RATE, \
-        DEFAULT_ADAM_DECAY
+        DEFAULT_ADAM_DECAY, NUM_HEADS, EMBEDDING_SIZE, KEY_DIMS
 
 
 def loss_function(
@@ -150,6 +150,35 @@ def coeff_determination(y_true, y_pred):
     SS_tot = K.sum(K.square(y_true - K.mean(y_true)))
     return (1 - SS_res / (SS_tot + K.epsilon()))
 
+def get_multihead_attention(
+    inbound_layer,
+    num_heads,
+    key_dim,
+    filters,
+    kernel_size,
+    activation,
+    padding,
+    n
+):
+    """
+    Return an Embedding + Multi Head Attention model
+    """
+    # apparently tf Embedding is not an option here,
+    # because the input is (None, 1024, 5), and Embedding(input) is (Nome, 1024, 5, embed_dim), instead of (None, 1024, 5)
+    # maybe a 1D Conv??
+    inbound_layer = get_layer(
+        inbound_layer, 
+        filters,
+        kernel_size,
+        activation,
+        padding,
+        n=n
+    )
+    
+    inbound_layer = tf.keras.layers.MultiHeadAttention(key_dim=key_dim, num_heads=num_heads)(query=inbound_layer, value=inbound_layer)
+    layer_norm = tf.keras.layers.LayerNormalization()(inbound_layer)
+    inbound_layer = tf.keras.layers.Add()([inbound_layer, layer_norm])
+    return inbound_layer
 
 def get_layer(
         inbound_layer,
@@ -275,6 +304,135 @@ def get_dilated_cnn(
         output_layer = Dense(output_length, activation=output_activation, kernel_initializer='glorot_uniform')(
             output_layer)
 
+    print("Pass all model")
+    logging.debug("Added outputs layer: " + "\n - " + str(output_layer))
+
+    # Model
+    model = Model(inputs=[input_layer], outputs=[output_layer])
+    print("Pass build model")
+
+    model.compile(
+        optimizer=Adam(
+            lr=adam_learning_rate,
+            beta_1=adam_beta_1,
+            beta_2=adam_beta_2,
+            weight_decay=adam_decay
+        ),
+        loss=loss_function,
+        metrics=[dice_coef]
+    )
+    print("Pass compiled")
+
+    logging.debug("Model compiled")
+
+    if weights is not None:
+        model.load_weights(weights)
+        logging.debug("Weights loaded")
+
+    return model
+
+
+def get_dilated_cnn_with_attention(
+        output_activation,
+        num_heads=NUM_HEADS,
+        embedding_size=EMBEDDING_SIZE,
+        key_dims=KEY_DIMS,
+        adam_learning_rate=DEFAULT_ADAM_LEARNING_RATE,
+        adam_decay=DEFAULT_ADAM_DECAY,
+        input_length=INPUT_LENGTH,
+        input_channels=INPUT_CHANNELS,
+        input_filters=INPUT_FILTERS,
+        input_kernel_size=INPUT_KERNEL_SIZE,
+        input_activation=INPUT_ACTIVATION,
+        output_filters=OUTPUT_FILTERS,
+        output_kernel_size=OUTPUT_KERNEL_SIZE,
+        filters_scaling_factor=FILTERS_SCALING_FACTOR,
+        dilation_rate=DILATION_RATE,
+        output_length=OUTPUT_LENGTH,
+        conv_blocks=CONV_BLOCKS,
+        padding=PADDING,
+        pool_size=POOL_SIZE,
+        adam_beta_1=ADAM_BETA_1,
+        adam_beta_2=ADAM_BETA_2,
+        target_scale_factor=1,
+        dense_b=False,
+        weights=None
+):
+    """
+    Exactly the same architecture as the dilated CNN above, but with the addition of an attention layer
+    """
+    logging.debug("Building Dilated CNN model")
+
+    # Inputs
+    input_layer = Input(shape=(input_length, input_channels))
+
+    # Temporary variables
+    layer = get_multihead_attention(    # redefined in encoder/decoder loops
+        inbound_layer=input_layer,
+        num_heads=num_heads,
+        key_dim=key_dims,
+        filters=embedding_size,
+        kernel_size=input_kernel_size,
+        activation=input_activation,
+        padding=padding,
+        n=1
+    )
+    filters = input_filters  # redefined in encoder/decoder loops
+
+    #logging.debug("Added inputs layer: " + "\n - " + str(layer))
+
+    # Encoder
+    all_layers = []
+    for i in range(conv_blocks - 1):  # [0, 1, 2, 3, 4, 5]
+        layer_dilation_rate = dilation_rate[i]
+        layer = get_layer(
+            inbound_layer=layer,  # input_layer is used wo MaxPooling1D
+            filters=filters,
+            kernel_size=input_kernel_size,
+            activation=input_activation,
+            padding=padding,
+            dilation_rate=layer_dilation_rate,
+            kernel_initializer=KERNEL_INITIALIZER
+        )
+        #logging.debug("Added convolution layer: " + str(i) + "\n - " + str(layer))
+        # encoder_layers.append(layer)  # save all layers wo MaxPooling1D
+        if i < conv_blocks - 1:  # need to update all except the last layers
+            filters = round(filters * filters_scaling_factor)
+            layer = MaxPooling1D(pool_size=pool_size, strides=pool_size)(layer)
+        all_layers.append(layer)
+
+    # Outputs
+    layer_dilation_rate = dilation_rate[-1]
+    if dense_b:
+        output_layer = get_layer(
+            inbound_layer=layer,
+            filters=output_filters,
+            kernel_size=output_kernel_size,
+            activation=input_activation,
+            padding=padding,
+            dilation_rate=layer_dilation_rate,
+            kernel_initializer=KERNEL_INITIALIZER,
+            skip_batch_norm=True,
+            n=1
+        )
+    else:
+        output_layer = get_layer(
+            inbound_layer=layer,
+            filters=output_filters,
+            kernel_size=output_kernel_size,
+            activation=output_activation,
+            padding=padding,
+            dilation_rate=layer_dilation_rate,
+            kernel_initializer=KERNEL_INITIALIZER,
+            skip_batch_norm=True,
+            n=1
+        )
+
+    # Depending on the output activation functions, model outputs need to be scaled appropriately
+    output_layer = Flatten()(output_layer)
+    if dense_b:
+        output_layer = Dense(output_length, activation=output_activation, kernel_initializer='glorot_uniform')(
+            output_layer)
 
     logging.debug("Added outputs layer: " + "\n - " + str(output_layer))
 
@@ -286,7 +444,7 @@ def get_dilated_cnn(
             lr=adam_learning_rate,
             beta_1=adam_beta_1,
             beta_2=adam_beta_2,
-            decay=adam_decay
+            weight_decay=adam_decay
         ),
         loss=loss_function,
         metrics=[dice_coef]
@@ -299,4 +457,3 @@ def get_dilated_cnn(
         logging.debug("Weights loaded")
 
     return model
-

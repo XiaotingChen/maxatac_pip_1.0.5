@@ -11,7 +11,12 @@ import pybedtools
 import os
 import glob
 
-from maxatac.architectures.dcnn import get_dilated_cnn
+import json
+
+from maxatac.utilities import constants
+from maxatac.architectures.dcnn import get_dilated_cnn, get_dilated_cnn_with_attention
+from maxatac.architectures.transformers import get_transformer
+
 from maxatac.utilities.constants import BP_RESOLUTION, BATCH_SIZE, CHR_POOL_SIZE, INPUT_LENGTH, INPUT_CHANNELS, \
     BP_ORDER, TRAIN_SCALE_SIGNAL, BLACKLISTED_REGIONS, DEFAULT_CHROM_SIZES
 from maxatac.utilities.genome_tools import load_bigwig, load_2bit, get_one_hot_encoded, build_chrom_sizes_dict
@@ -104,6 +109,22 @@ class MaxATACModel(object):
                                    dense_b=self.dense,
                                    weights=self.weights
                                    )
+
+        elif self.arch == "DCNN_V2_attention":
+            return get_dilated_cnn_with_attention(
+                output_activation=self.output_activation,
+                target_scale_factor=self.target_scale_factor,
+                dense_b=self.dense,
+                weights=self.weights
+            )
+        elif self.arch == "Transformer_phuc":
+            return get_transformer(
+                output_activation=self.output_activation,
+                target_scale_factor=self.target_scale_factor,
+                dense_b=self.dense,
+                weights=self.weights
+            )
+
         else:
             sys.exit("Model Architecture not specified correctly. Please check")
 
@@ -827,3 +848,27 @@ class GenomicRegions(object):
         df["Cell_Line"] = ROI_cell_tag
 
         return df
+
+
+def save_metadata(output_dir, args):
+    """
+    Save the metadata every time the model is run
+    The following data will be saved:
+        - The constants stored in constants.py
+        - The command line arguments 
+        - The logger file (how?)
+    """
+    common_python_modules = ["os", "sys", "logging", "time", "math", "glob"]
+    constants_names = [i for i in dir(constants) if ((not i.startswith("__")) and (i not in common_python_modules))]
+    constants_dict = {
+        name: getattr(constants, name) for name in constants_names
+    }
+    with open(os.path.join(output_dir, "constants.json"), "w") as f:
+        json.dump(constants_dict, f, sort_keys=True, indent=3)
+
+    # Get the command line arguments and save it
+    args_dict = vars(args)
+    args_dict.pop("func", None)
+    with open(os.path.join(output_dir, "cmd_args.json"), "w") as f:
+        json.dump(args_dict, f, sort_keys=True, indent=3)
+

@@ -77,17 +77,34 @@ DEFAULT_TRAIN_EPOCHS = 20
 
 DEFAULT_TRAIN_BATCHES_PER_EPOCH = 100
 
-DEFAULT_ADAM_LEARNING_RATE = 1e-3
+
+DEFAULT_ADAM_LEARNING_RATE = 0.001
 DEFAULT_ADAM_DECAY = 1e-5
 DEFAULT_VALIDATE_RAND_RATIO = .7
 
+# Constants for the conv tower before MHA (key is number of conv layers, value is number of filters)
+CONV_TOWER_CONFIGS = [
+    {"num_layer": 2, "kernel": 5, "stride": 1, "padding": "same", "num_filters": 64, "activation": "relu"}
+]
+DOWNSAMPLE_METHOD_CONV_TOWER = "conv"
+
+# Constants for self-attention (embedding size must be equal num_heads * key_dims, and must also be equal
+#                               to the num filters of the last layer in the conv filters
+# )
+EMBEDDING_SIZE = 64
+NUM_HEADS = 4
+KEY_DIMS = 16
+NUM_MHA = 4
+D_FF = 256
+
 # Can be changed without problems
-BATCH_SIZE = 1000
-VAL_BATCH_SIZE = 1000
+BATCH_SIZE = 100
+VAL_BATCH_SIZE = 100
 BP_DICT = {"A":0, "C":1, "G":2, "T":3}
 CHR_POOL_SIZE = 1000
 BP_ORDER = ["A", "C", "G", "T"]
-INPUT_FILTERS = 15
+INPUT_FILTERS = 16
+
 INPUT_KERNEL_SIZE = 7
 INPUT_LENGTH = 1024
 OUTPUT_LENGTH = 32  # INPUT_LENGTH/BP_RESOLUTION
@@ -103,6 +120,7 @@ BP_RESOLUTION = 32
 OUTPUT_FILTERS = 1
 OUTPUT_KERNEL_SIZE = 1
 POOL_SIZE = 2
+POOL_SIZE_BEFORE_FLATTEN = 8
 ADAM_BETA_1 = 0.9
 ADAM_BETA_2 = 0.999
 TRAIN_SCALE_SIGNAL = (0.9, 1.15)  # min max scaling ranges

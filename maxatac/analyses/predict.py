@@ -90,7 +90,8 @@ def run_prediction(args):
                                                  chrom_sizes=args.chromosome_sizes,
                                                  blacklist=args.blacklist,
                                                  step_size=args.step_size
-                                                 )
+                                                 )  # this is a pandas Dataframe
+
         
         chrom_list = args.chromosomes
     
@@ -106,15 +107,29 @@ def run_prediction(args):
                   f"Output filename: {outfile_name_bigwig}"
                   )
 
-    with Pool(int(multiprocessing.cpu_count())) as p:
-        forward_strand_predictions = p.starmap(make_stranded_predictions,
-                                               [(regions_pool,
-                                                 args.signal,
-                                                 args.sequence,
-                                                 args.model,
-                                                 args.batch_size,
-                                                 False,
-                                                 chromosome) for chromosome in chrom_list])
+
+    ## The reason why this is put through multiprocessing is probably each thread deals with one chromosome, as there's a whole chrom_list
+    #if args.multiprocessing and args.multiprocessing != "False":
+    #    with Pool(int(multiprocessing.cpu_count())) as p:
+    #        forward_strand_predictions = p.starmap(make_stranded_predictions,
+    #                                            [(regions_pool,
+    #                                                args.signal,
+    #                                                args.sequence,
+    #                                                args.model,
+    #                                                args.batch_size,
+    #                                                False,
+    #                                                chromosome) for chromosome in chrom_list])
+    if False: pass
+    else:
+        forward_strand_predictions = []
+        for chromosome in chrom_list:
+            forward_strand_predictions.append(make_stranded_predictions(regions_pool,
+                                                                    args.signal,
+                                                                    args.sequence,
+                                                                    args.model,
+                                                                    args.batch_size,
+                                                                    False,
+                                                                    chromosome))
 
     logging.error("Write predictions to a bigwig file")
 

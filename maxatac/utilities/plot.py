@@ -1,11 +1,46 @@
 from maxatac.utilities.system_tools import replace_extension, remove_tags, Mute
 import matplotlib.pyplot as plt
 import numpy as np
+import os
+import seaborn as sns
 import pyBigWig
+
+import tensorflow as tf
 
 with Mute():
     from tensorflow.keras.utils import plot_model
 
+
+
+def plot_attention_weights(model, transformer_names, data_sample, num_heads, file_location):
+    """
+    Plot the attention weights of all heads for all transformer layers
+    data_sample has shape (1, 1024, 5), 1 is the batch size and we want to keep it as 1
+    """
+    num_layers = len(transformer_names)
+    fig, axes = plt.subplots(nrows=num_layers, ncols=num_heads, figsize=(40, 40))
+
+    for l in range(num_layers):
+
+        # Build a submodel
+        transformer_name = transformer_names[l]
+        submodel = tf.keras.Model(model.inputs, model.get_layer(transformer_name).output)
+
+        # Make an inference
+        att_weights = submodel.predict(data_sample, verbose=0)
+        seq_len = att_weights.shape[-1]
+        att_weights = tf.reshape(att_weights, (-1, seq_len, seq_len))
+        
+        for h in range(num_heads):
+            att_weights_per_head = att_weights[h]
+            sns.heatmap(data=att_weights_per_head, ax=axes[l][h])
+            axes[l][h].set_title(f"L{l+1} - H{h+1}")
+            axes[l][h].set_axis_off()
+
+    plt.tight_layout()
+    plt.savefig(
+        os.path.join(file_location, "attention_weights.png"),
+    )
 
 def export_model_structure(model, file_location, suffix="_model_structure", ext=".png", skip_tags="_{epoch}"):
     plot_model(
