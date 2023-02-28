@@ -11,7 +11,7 @@ with Mute():
     from tensorflow.keras.utils import plot_model
 
 
-def plot_attention_weights(model, transformer_names, data_sample, num_heads, file_location):
+def plot_attention_weights(model, transformer_names, data_sample, num_heads, file_location, use_rpe):
     """
     Plot the attention weights of all heads for all transformer layers
     data_sample has shape (1, 1024, 5), 1 is the batch size and we want to keep it as 1
@@ -26,7 +26,10 @@ def plot_attention_weights(model, transformer_names, data_sample, num_heads, fil
         submodel = tf.keras.Model(model.inputs, model.get_layer(transformer_name).output)
 
         # Make an inference
-        att_weights = submodel.predict(data_sample, verbose=0)
+        if use_rpe:
+            _, att_weights = submodel.predict(data_sample, verbose=0)
+        else:
+            att_weights = submodel.predict(data_sample, verbose=0)
         seq_len = att_weights.shape[-1]
         att_weights = tf.reshape(att_weights, (-1, seq_len, seq_len))
         

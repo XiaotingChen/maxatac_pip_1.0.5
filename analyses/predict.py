@@ -5,6 +5,7 @@ import os
 import glob
 import timeit
 import pandas as pd
+import json
 import multiprocessing
 from multiprocessing import Pool, Manager
 from maxatac.utilities.system_tools import get_dir, Mute
@@ -62,6 +63,10 @@ def run_prediction(args):
 
     # Create the output directory set by the parser
     output_directory = get_dir(args.output)
+
+    # Open the training args JSON file
+    with open(args.train_json, "r") as f:
+        train_args = json.load(f)
 
     # Output filename for the bigwig predictions file based on the output directory and the prefix. Add the bw extension
     outfile_name_bigwig = os.path.join(output_directory, args.prefix + ".bw")
@@ -127,7 +132,8 @@ def run_prediction(args):
                                                                     args.model,
                                                                     args.batch_size,
                                                                     False,
-                                                                    chromosome))
+                                                                    chromosome,
+                                                                    train_args=train_args))
 
     logging.error("Write predictions to a bigwig file")
 

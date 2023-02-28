@@ -106,6 +106,9 @@ def get_parser():
     phuc_parser.add_argument("--ablation_random_genome_file", type=str, default="", required=False,
                             help="Perform ablation study on the genome"
                             )
+    phuc_parser.add_argument("--compare_training_and_zorn", type=bool, default=False, required=False,
+                            help="Make visualizations to compare training and Zorn dataset"
+                            )
     phuc_parser.add_argument("--loglevel",
                                 dest="loglevel",
                                 type=str,
@@ -238,6 +241,13 @@ def get_parser():
                                 type=str,
                                 default=REFERENCE_SEQUENCE_TWOBIT,
                                 help="Genome sequence hg38.2bit file."
+                                )
+
+    predict_parser.add_argument("--train_json",
+                                dest="train_json",
+                                type=str,
+                                required=True,
+                                help="The JSON file that contains user-defined arguments for training"
                                 )
 
     predict_parser.add_argument("--multiprocessing",

@@ -2,6 +2,7 @@
 from contextlib import redirect_stdout
 import logging
 import os
+import json
 import pandas as pd
 import sys
 import numpy as np
@@ -9,6 +10,8 @@ from scipy.spatial import distance
 import glob
 import matplotlib.pyplot as plt
 import seaborn as sns
+import glob
+import ntpath
 from maxatac.utilities.system_tools import get_dir, Mute
 
 with Mute():
@@ -35,6 +38,8 @@ def phuc_func(args):
         debug_model_architectures(args.debug_forward_pass_model)
     if args.ablation_random_genome_file != "":
         ablation_random_genome(args.ablation_random_genome_file)
+    if args.compare_training_and_zorn:
+        visualize_zorn_atac()
 
 def prepare_metafile(data_dir):
     """
@@ -52,17 +57,18 @@ def prepare_metafile(data_dir):
         return None
 
     # Create list of cell lines and tfs
-    cell_lines, tfs = [], []
-    with open(os.path.join(data_dir, "cell_lines.txt"), "r") as f:
-        for line in f.readlines():
-            cell_lines.append(line.rstrip("\n"))
+    tfs = []
     with open(os.path.join(data_dir, "tf.txt"), "r") as f:
         for line in f.readlines():
             tfs.append(line.rstrip("\n"))
 
-    files = []
-    for cell_line in cell_lines:
-        for tf in tfs:
+    with open(os.path.join(data_dir, "tf_to_cell_line.json"), "r") as f:
+        d = json.load(f)
+
+    for tf in tfs:
+        files = []
+        cell_lines = d[tf]
+        for cell_line in cell_lines:
             row = [
                 cell_line,
                 tf,
@@ -75,9 +81,9 @@ def prepare_metafile(data_dir):
             if None not in row:
                 files.append(row)
 
-    df = pd.DataFrame(data=files, columns=["Cell_Line", "TF", "CHIP_Peaks", "Binding_File", "ATAC_Signal_File", "ATAC_Peaks", "Train_Test_Label"])
-    df.to_csv(os.path.join(data_dir, "meta_file.tsv"), sep="\t")
-    print(f"Metafile located at {os.path.join(data_dir, 'meta_file.tsv')}")
+        df = pd.DataFrame(data=files, columns=["Cell_Line", "TF", "CHIP_Peaks", "Binding_File", "ATAC_Signal_File", "ATAC_Peaks", "Train_Test_Label"])
+        df.to_csv(os.path.join(data_dir, f"meta_file_{tf}.tsv"), sep="\t")
+        print(f"Metafile for {tf} located at {os.path.join(data_dir, f'meta_file_{tf}.tsv')}")
 
 
 def generate_numpy_arrays(gen, save_dir):
@@ -105,7 +111,10 @@ def get_model_summary(model_link):
             with redirect_stdout(f):
                 nn_model.summary()
     except:
-        logging.error("The model does not exist")
+        try:
+            pass
+        except:
+            logging.error("The model does not exist")
 
 
 def debug_plot_model(model_link):
@@ -157,6 +166,108 @@ def debug_model_architectures(model_name):
 
     outputs = model.predict(toy_inputs)
     print(f"Output shape: {outputs.shape}")
+
+def _get_generator(signal, chromosome):
+    """
+    Get a generator for the training data
+    """
+    sequence = "/users/ngun7t/opt/maxatac/data/hg38/hg38.2bit"
+    batch_size = 10000
+    chromosomes = ["chr1", "chr8"]
+        
+    # predict on all chromosomes
+    #if args.chromosomes[0] == 'all':
+    #    from maxatac.utilities.constants import AUTOSOMAL_CHRS as all_chr
+    #    args.chromosomes = all_chr
+
+    # Output filename for the bigwig predictions file based on the output directory and the prefix. Add the bw extension
+    #outfile_name_bigwig = os.path.join(output_directory, args.prefix + ".bw")
+
+    # The function build_chrom_sizes_dict is used to make sure regions fall within chromosome bounds.
+    # Create a dictionary of chromosome sizes used to make the bigwig files
+    #chrom_sizes_dict = build_chrom_sizes_dict(chromosomes, DEFAULT_CHROM_SIZES)
+    
+    # Import the regions for prediction.
+    regions_pool = create_prediction_regions(chromosomes=chromosomes,
+                                                chrom_sizes=DEFAULT_CHROM_SIZES,
+                                                blacklist=BLACKLISTED_REGIONS,
+                                                step_size=int(INPUT_LENGTH/4)
+                                                )  # this is a pandas Dataframe
+    
+    #chrom_list = chromosomes
+
+    # Get the roi pools on only the chromosomes specified
+    chr_roi_pool = regions_pool[regions_pool["chr"] == chromosome].copy()
+
+    # This returns a numpy array
+    data_generator = PredictionDataGenerator(signal=signal,
+                                             sequence=sequence,
+                                             input_channels=INPUT_CHANNELS,
+                                             input_length=INPUT_LENGTH,
+                                             predict_roi_df=chr_roi_pool,
+                                             batch_size=batch_size,
+                                             use_complement=False)
+    return data_generator
+
+
+def visualize_zorn_atac():
+    """
+    Visualize Zorn's normalized ATAC-seq data to see if it's out of distribution
+    """
+    # Let's see if we can plot all ATAC-seq signals in one run
+    # We have one ATAC-seq for each cell type
+    # Plot the histogram of max ATAC-seq peaks for the training data and the Zorn dataset
+    zorn_train_cell_types = [
+        "HEK293T",
+        "K562",
+        "HepG2",
+        "GM12878",
+        "MCF-7",
+        "Panc1",
+        "HEK293",
+    ]
+    training_atac_dir = "/data/weirauchlab/team/ngun7t/maxatac/training_data/ATAC_Signal_File/ATAC_Signal_File"
+    zorn_atac_dir = "/data/weirauchlab/team/ngun7t/maxatac/zorn/Zorn_hESC_ATAC/outputs"
+    training_atac = [os.path.join(training_atac_dir, n) for n in os.listdir(training_atac_dir) if n.split("_")[0] in zorn_train_cell_types]
+    zorn_atac = glob.glob(f"{zorn_atac_dir}/*/maxatac/normalize_bigwig/*.bw")
+    save_dir = "/data/weirauchlab/team/ngun7t/maxatac/runs/data_viz"
+    chromosome = "chr1"
+
+    # Borrow the code from ablation_random_genome for creating the generator
+    fig, axes = plt.subplots(ncols=4, nrows=4, figsize=(30, 20))
+    axes = axes.ravel()
+
+    # for training
+    for i, tr_atac in enumerate(training_atac):
+        file_name = ntpath.basename(tr_atac)
+        cell_type = file_name.split("_")[0]
+        data_generator = _get_generator(tr_atac, chromosome)
+        inputs = next(iter(data_generator))
+        total_atac = inputs[:, :, -1]
+
+        # Plot the ATAC-seq max signal histogram
+        max_atac_signals = np.max(total_atac, axis=1)
+        sns.histplot(data=max_atac_signals, ax=axes[i])
+        axes[i].set_title(f"training_{cell_type}")
+    
+    # for zorn
+    for i, zo_atac in enumerate(zorn_atac):
+        file_name = ntpath.basename(zo_atac)
+        cell_type = file_name.split("_")[0]
+        data_generator = _get_generator(zo_atac, chromosome)
+        inputs = next(iter(data_generator))
+        total_atac = inputs[:, :, -1]
+
+        # Plot the ATAC-seq max signal histogram
+        max_atac_signals = np.max(total_atac, axis=1)
+        sns.histplot(data=max_atac_signals, ax=axes[i + 8])
+        axes[i + 8].set_title(f"zorn_{cell_type}")
+
+    axes[7].remove()
+    axes[15].remove()
+
+    plt.tight_layout()
+    plt.savefig(f"{save_dir}/train_vs_zorn_max_atac_peaks_{chromosome}.png")
 
 
 def ablation_random_genome(metadata_file):

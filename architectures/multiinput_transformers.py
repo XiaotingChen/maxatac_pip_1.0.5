@@ -28,7 +28,7 @@ with Mute():
         INPUT_KERNEL_SIZE, INPUT_ACTIVATION, OUTPUT_FILTERS, OUTPUT_KERNEL_SIZE, FILTERS_SCALING_FACTOR, DILATION_RATE, \
         OUTPUT_LENGTH, CONV_BLOCKS, PADDING, POOL_SIZE, ADAM_BETA_1, ADAM_BETA_2, DEFAULT_ADAM_LEARNING_RATE, \
         DEFAULT_ADAM_DECAY, NUM_HEADS, NUM_MHA, KEY_DIMS, D_FF, CONV_TOWER_CONFIGS, EMBEDDING_SIZE, POOL_SIZE_BEFORE_FLATTEN, \
-        DOWNSAMPLE_METHOD_CONV_TOWER, INCEPTION_BRANCHES, WHOLE_ATTENTION_KWARGS, USE_RPE, DM_DROPOUT_RATE
+        DOWNSAMPLE_METHOD_CONV_TOWER, INCEPTION_BRANCHES, WHOLE_ATTENTION_KWARGS, USE_RPE, DM_DROPOUT_RATE, CONV_TOWER_CONFIGS_FUSION
 
     from maxatac.architectures.dcnn import loss_function, dice_coef, get_layer
     from maxatac.architectures.attention_module_TF import TransformerBlock
@@ -96,7 +96,7 @@ def get_conv_block(
 
 
 def get_conv_tower(
-    inbound_layer, conv_tower_configs, downsample_method
+    inbound_layer, conv_tower_configs, downsample_method, base_name
 ):
     """
     Feed the input through the tower of conv layers
@@ -109,15 +109,15 @@ def get_conv_tower(
         inbound_layer = get_conv_block(
             inbound_layer, 
             conv_block_config,
-            base_name=f"Conv_tower_block_{count}"
+            base_name=f"{base_name}_conv_tower_block_{count}"
         )
         print(f"after conv block: {inbound_layer.shape}")
         # After each conv block, use maxpooling to reduce seq len by 2
         # set option to downsample whether with maxpooling or conv1d stride 2
         if downsample_method == "maxpooling":
-            inbound_layer = MaxPooling1D(pool_size=5, strides=2, padding="same", name=f"Conv_tower_block_{count}_maxpool")(inbound_layer)
+            inbound_layer = MaxPooling1D(pool_size=5, strides=2, padding="same", name=f"{base_name}_Conv_tower_block_{count}_maxpool")(inbound_layer)
         else:
-            inbound_layer = Conv1D(filters=conv_block_config["num_filters"], kernel_size=conv_block_config["kernel"], strides=2, padding="same", name=f"Conv_tower_block_{count}_downsampling_conv")(inbound_layer)
+            inbound_layer = Conv1D(filters=conv_block_config["num_filters"], kernel_size=conv_block_config["kernel"], strides=2, padding="same", name=f"{base_name}_Conv_tower_block_{count}_downsampling_conv")(inbound_layer)
     
     return inbound_layer
 
@@ -233,10 +233,11 @@ def get_multihead_attention_custom(
 
     return output, att_weights
 
-def get_transformer(
+def get_multiinput_transformer(
         output_activation,
         rpe_attention_kwargs=WHOLE_ATTENTION_KWARGS,
         use_rpe=USE_RPE,
+        conv_tower_config_fusion=CONV_TOWER_CONFIGS_FUSION,
         dm_dropout_rate=DM_DROPOUT_RATE,
         conv_tower_config=CONV_TOWER_CONFIGS,
         inception_block_config=INCEPTION_BRANCHES,
@@ -273,16 +274,29 @@ def get_transformer(
     """
     logging.debug("Building Dilated CNN model")
 
-    # Inputs
-    input_layer = Input(shape=(input_length, input_channels))
+    # Current there are two inputs: one for the genome sequence, one for the ATAC-seq signal
+    genome_input = Input(shape=(input_length, 4), name="genome")
+    atacseq_input = Input(shape=(input_length, 1), name="atac")
 
-    # Temporary variables
-    layer = input_layer  # redefined in encoder/decoder loops
+    # The current feature dim to the transformer is 64
+    # Using 2 inputs, each input will be transformed to feature dim of 32
+    # Then they are concatenated and passed through another conv layer to keep the same 64
+    genome_layer = genome_input
+    atacseq_layer = atacseq_input
     filters = input_filters  # redefined in encoder/decoder loops
 
-    # Get the initial stem conv layer
-    layer = get_layer(
-        inbound_layer=layer,
+    genome_layer = get_layer(
+        inbound_layer=genome_layer,
+        filters=filters,
+        kernel_size=input_kernel_size,
+        activation=input_activation,
+        padding=padding,
+        dilation_rate=1,
+        kernel_initializer=KERNEL_INITIALIZER,
+        n=1
+    )
+    atacseq_layer = get_layer(
+        inbound_layer=atacseq_layer,
         filters=filters,
         kernel_size=input_kernel_size,
         activation=input_activation,
@@ -292,11 +306,14 @@ def get_transformer(
         n=1
     )
 
-    # Get the conv tower (output has shape batch_size, seq_len, embed_dim)
-    layer = get_conv_tower(layer, conv_tower_config, downsample_method_conv_tower)
+    # Get the conv tower for each branch
+    genome_layer = get_conv_tower(genome_layer, conv_tower_config_fusion["genome"], downsample_method_conv_tower, "genome")
+    atacseq_layer = get_conv_tower(atacseq_layer, conv_tower_config_fusion["atac"], downsample_method_conv_tower, "atac")
 
-    # Add an inception block
-    #layer = get_inception_block(layer, inception_block_config, "Inception_block")
+    # genome_layer and atacseq_layer now should have shape (batch, seq_len, mha_embed_dim // 2)
+    # Concatenate the two and pass it through another conv layer
+    layer = tf.keras.layers.Concatenate(axis=-1)([genome_layer, atacseq_layer])
+    layer = get_conv_block(layer, conv_tower_config_fusion["merge"], "Intermediate_fusion_conv")
 
     # get seq_len after the conv tower
     seq_len = layer.shape[1]
@@ -366,7 +383,7 @@ def get_transformer(
     logging.debug("Added outputs layer: " + "\n - " + str(output_layer))
 
     # Model
-    model = Model(inputs=[input_layer], outputs=output_layer)
+    model = Model(inputs=[genome_input, atacseq_input], outputs=output_layer)
 
     model.compile(
         optimizer=Adam(

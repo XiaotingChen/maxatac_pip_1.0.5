@@ -1,0 +1,21 @@
+#BSUB -W 24:00
+#BSUB -n 12
+#BSUB -M 80000
+#BSUB -R "span[hosts=1]"
+#BSUB -e logs/benchmark_%J.err
+#BSUB -o logs/benchmark_%J.out
+
+# load modules
+module load bedtools/2.29.2-wrl
+module load samtools/1.6-wrl
+module load pigz/2.6.0
+module load ucsctools
+
+source activate maxatac
+cd /data/weirauchlab/team/ngun7t/maxatac/runs
+
+# the main command
+maxatac benchmark --prediction /data/weirauchlab/team/ngun7t/maxatac/zorn/Zorn_hESC_ATAC/outputs/D1_mesendoderm/maxatac/predictions/LEF1/D1_mesendoderm_LEF1.bw \
+--gold_standard /data/weirauchlab/team/ngun7t/maxatac/zorn/Zorn_hESC_CHIP/outputs/temp/D1_mesendoderm_LEF1_peaks.bw \
+--prefix maxatac_benchmark \
+--chromosomes chr1

@@ -5,13 +5,14 @@ import pandas as pd
 import pybedtools
 import tensorflow as tf
 
-from maxatac.utilities.constants import INPUT_CHANNELS, INPUT_LENGTH, ALL_CHRS
+from maxatac.utilities.constants import INPUT_CHANNELS, INPUT_LENGTH, ALL_CHRS, INTER_FUSION
 from maxatac.utilities.system_tools import Mute
 
 with Mute():
     from tensorflow.keras.models import load_model
     from maxatac.utilities.genome_tools import load_bigwig, load_2bit, dump_bigwig
-    from maxatac.utilities.training_tools import get_input_matrix
+    from maxatac.utilities.training_tools import get_input_matrix, MaxATACModel
+    from maxatac.architectures.transformers import get_transformer
  
 def sortChroms(chrom):
     """Sort a list of chromosomes based on a specific order
@@ -243,10 +244,15 @@ class PredictionDataGenerator(tf.keras.utils.Sequence):
         # Generate indexes of the batch
         batch_indexes = self.indexes[index * self.batch_size:(index + 1) * self.batch_size]
 
-        # Generate data
+        # Generate data (X has shape (batch, seq_len, dim))
         X = self.__data_generation__(batch_indexes)
 
-        return X
+        if not INTER_FUSION:
+            return X
+        else:
+            genome = X[...,:4]
+            atac = np.expand_dims(X[...,4], axis=-1)
+            return {"genome": genome, "atac": atac}
 
     def __data_generation__(self, batch_indexes):
         """
@@ -303,6 +309,7 @@ def make_stranded_predictions(roi_pool: pd.DataFrame,
                               batch_size: int,
                               use_complement: bool,
                               chromosome: str,
+                              train_args: dict,
                               number_intervals: int =32,
                               input_channels: int =INPUT_CHANNELS,
                               input_length: int =INPUT_LENGTH):
@@ -312,7 +319,21 @@ def make_stranded_predictions(roi_pool: pd.DataFrame,
 
     logging.error("Load pre-trained model")
 
-    nn_model = load_model(model, compile=False)
+    # model: str now points to the file with the weights
+    try:
+        nn_model = load_model(model, compile=False)
+    except:
+        maxatac_model = MaxATACModel(arch=train_args["arch"],
+                                    seed=train_args["seed"],
+                                    output_directory=train_args["output"],
+                                    prefix=train_args["prefix"],
+                                    threads=train_args["threads"],
+                                    meta_path=train_args["meta_file"],
+                                    output_activation=train_args["output_activation"],
+                                    dense=train_args["dense"],
+                                    weights=model
+                                    )
+        nn_model = maxatac_model.nn_model
 
     # Checking the log error file, it shows that this log appears after the log above displays a lot of times
     # So I think what happened is that because this make_stranded_predictions is wrapped around a Pool multiprocessing,

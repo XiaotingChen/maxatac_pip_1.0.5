@@ -11,12 +11,15 @@ import pybedtools
 import os
 import glob
 import json
+import ntpath
+import shutil
 
 from maxatac.utilities import constants
 from maxatac.architectures.dcnn import get_dilated_cnn, get_dilated_cnn_with_attention
 from maxatac.architectures.transformers import get_transformer
+from maxatac.architectures.multiinput_transformers import get_multiinput_transformer
 from maxatac.utilities.constants import BP_RESOLUTION, BATCH_SIZE, CHR_POOL_SIZE, INPUT_LENGTH, INPUT_CHANNELS, \
-    BP_ORDER, TRAIN_SCALE_SIGNAL, BLACKLISTED_REGIONS, DEFAULT_CHROM_SIZES
+    BP_ORDER, TRAIN_SCALE_SIGNAL, BLACKLISTED_REGIONS, DEFAULT_CHROM_SIZES, INTER_FUSION
 from maxatac.utilities.genome_tools import load_bigwig, load_2bit, get_one_hot_encoded, build_chrom_sizes_dict
 from maxatac.utilities.system_tools import get_dir, remove_tags, replace_extension
 
@@ -115,12 +118,20 @@ class MaxATACModel(object):
                 weights=self.weights
             )
         elif self.arch == "Transformer_phuc":
-            return get_transformer(
-                output_activation=self.output_activation,
-                target_scale_factor=self.target_scale_factor,
-                dense_b=self.dense,
-                weights=self.weights
-            )
+            if (INTER_FUSION):
+                return get_multiinput_transformer(
+                    output_activation=self.output_activation,
+                    target_scale_factor=self.target_scale_factor,
+                    dense_b=self.dense,
+                    weights=self.weights
+                )
+            else:
+                return get_transformer(
+                    output_activation=self.output_activation,
+                    target_scale_factor=self.target_scale_factor,
+                    dense_b=self.dense,
+                    weights=self.weights
+                )
         else:
             sys.exit("Model Architecture not specified correctly. Please check")
 
@@ -221,7 +232,13 @@ def DataGenerator(
             inputs_batch = roi_input_batch
             targets_batch = roi_target_batch
 
-        yield inputs_batch, targets_batch  # change to yield
+        if not INTER_FUSION:
+            yield inputs_batch, targets_batch  # change to yield
+        else:
+            # Split the inputs_batch to the genome track and the atacseq track
+            genome_batch = inputs_batch[...,:4]
+            atac_batch = np.expand_dims(inputs_batch[...,4], axis=-1)
+            yield {"genome": genome_batch, "atac": atac_batch}, targets_batch
 
 
 def get_input_matrix(signal_stream,
@@ -845,6 +862,7 @@ class GenomicRegions(object):
 
         return df
 
+
 def save_metadata(output_dir, args):
     """
     Save the metadata every time the model is run
@@ -858,11 +876,21 @@ def save_metadata(output_dir, args):
     constants_dict = {
         name: getattr(constants, name) for name in constants_names
     }
-    with open(os.path.join(output_dir, "constants.json"), "w") as f:
+    with open(os.path.join(output_dir, "constants.json"), "w+") as f:
         json.dump(constants_dict, f, sort_keys=True, indent=3)
+
+    # Save the meta file used to train the model
+    metafile_name = ntpath.basename(args.meta_file)
+    shutil.copyfile(args.meta_file, os.path.join(output_dir, metafile_name))
 
     # Get the command line arguments and save it
     args_dict = vars(args)
     args_dict.pop("func", None)
-    with open(os.path.join(output_dir, "cmd_args.json"), "w") as f:
+    with open(os.path.join(output_dir, "cmd_args.json"), "w+") as f:
         json.dump(args_dict, f, sort_keys=True, indent=3)
+
+
+def get_initializer(initializer_name):
+    """
+    A helper function to get the 
+    """

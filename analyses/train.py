@@ -9,7 +9,7 @@ import tensorflow
 
 from keras.utils.data_utils import OrderedEnqueuer
 
-from maxatac.utilities.constants import TRAIN_MONITOR, NUM_HEADS, NUM_MHA
+from maxatac.utilities.constants import TRAIN_MONITOR, NUM_HEADS, NUM_MHA, USE_RPE
 from maxatac.utilities.system_tools import Mute
 from maxatac.utilities.phuc_utilities import generate_numpy_arrays
 
@@ -66,12 +66,8 @@ def run_training(args):
     # Start Timer
     startTime = timeit.default_timer()
 
-    # Save metadata
-    save_metadata(args.output, args)
-
     logging.error("Set up model parameters")
 
-    
     # Initialize the model with the architecture of choice
     maxatac_model = MaxATACModel(arch=args.arch,
                                  seed=args.seed,
@@ -83,6 +79,9 @@ def run_training(args):
                                  dense=args.dense,
                                  weights=args.weights
                                  )
+                                 
+    # Save metadata
+    save_metadata(args.output, args)
 
     ## Save the args and the constants to the output folder
     #with open(os.path.join(args.output, "user_args.txt"), "w") as f:
@@ -92,6 +91,10 @@ def run_training(args):
     shutil.copyfile(
         "/users/ngun7t/anaconda3/envs/maxatac/lib/python3.9/site-packages/maxatac/utilities/constants.py",
         os.path.join(args.output, "constants.py")
+    )
+    shutil.copyfile(
+        "/users/ngun7t/anaconda3/envs/maxatac/lib/python3.9/site-packages/maxatac/architectures/transformers.py",
+        os.path.join(args.output, "transformers.py")
     )
     
     logging.error("Import training regions")
@@ -205,7 +208,10 @@ def run_training(args):
         export_model_structure(maxatac_model.nn_model, maxatac_model.results_location)
 
         data_sample = tensorflow.expand_dims(input_batch[0], axis=0)
-        mha_names = [f"Encoder_{i}_softmax_att_weights" for i in range(NUM_MHA)]
+        if not(USE_RPE):
+            mha_names = [f"Encoder_{i}_softmax_att_weights" for i in range(NUM_MHA)]
+        else:
+            mha_names = [f"Transformer_block_{i}" for i in range(NUM_MHA)]
         plot_attention_weights(maxatac_model.nn_model, mha_names, data_sample, num_heads=NUM_HEADS, file_location=args.output)
 
     logging.error("Results are saved to: " + maxatac_model.results_location)

@@ -1,0 +1,30 @@
+#!/bin/bash
+#BSUB -W 72:00
+#BSUB -n 16
+#BSUB -M 80000
+#BSUB -R "span[ptile=16]"
+#BSUB -e logs/train_%J.err
+#BSUB -o logs/train_%J.out
+#BSUB -q amdgpu
+#BSUB -gpu "num=1"
+
+# load modules
+module load bedtools/2.29.2-wrl
+module load gcc/9.3.0
+module load cuda/11.7
+module load samtools/1.6-wrl
+module load pigz/2.6.0
+module load ucsctools
+source activate maxatac
+
+# the main command
+
+cd /data/weirauchlab/team/ngun7t/maxatac/runs
+
+maxatac train --genome hg38 \
+--arch Transformer_phuc \
+--sequence /users/ngun7t/opt/maxatac/data/hg38/hg38.2bit \
+--meta_file /data/weirauchlab/team/ngun7t/maxatac/training_data/meta_file.tsv \
+--output /data/weirauchlab/team/ngun7t/maxatac/runs/run-transformer-6 \
+--prefix transformer \
+--epochs 200
