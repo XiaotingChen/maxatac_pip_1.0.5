@@ -312,7 +312,7 @@ def get_multiinput_transformer(
 
     # genome_layer and atacseq_layer now should have shape (batch, seq_len, mha_embed_dim // 2)
     # Concatenate the two and pass it through another conv layer
-    layer = tf.keras.layers.Concatenate(axis=-1)([genome_layer, atacseq_layer])
+    layer = tf.keras.layers.Concatenate(axis=1)([genome_layer, atacseq_layer])
     layer = get_conv_block(layer, conv_tower_config_fusion["merge"], "Intermediate_fusion_conv")
 
     # get seq_len after the conv tower

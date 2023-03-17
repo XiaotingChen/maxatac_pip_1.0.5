@@ -9,7 +9,7 @@ import tensorflow
 
 from keras.utils.data_utils import OrderedEnqueuer
 
-from maxatac.utilities.constants import TRAIN_MONITOR, NUM_HEADS, NUM_MHA, USE_RPE
+from maxatac.utilities.constants import TRAIN_MONITOR, NUM_HEADS, NUM_MHA, USE_RPE, INTER_FUSION
 from maxatac.utilities.system_tools import Mute
 from maxatac.utilities.phuc_utilities import generate_numpy_arrays
 
@@ -92,10 +92,16 @@ def run_training(args):
         "/users/ngun7t/anaconda3/envs/maxatac/lib/python3.9/site-packages/maxatac/utilities/constants.py",
         os.path.join(args.output, "constants.py")
     )
-    shutil.copyfile(
-        "/users/ngun7t/anaconda3/envs/maxatac/lib/python3.9/site-packages/maxatac/architectures/transformers.py",
-        os.path.join(args.output, "transformers.py")
-    )
+    if INTER_FUSION:
+        shutil.copyfile(
+            "/users/ngun7t/anaconda3/envs/maxatac/lib/python3.9/site-packages/maxatac/architectures/multiinput_transformers.py",
+            os.path.join(args.output, "multiinput_transformers.py")
+        )
+    else:
+        shutil.copyfile(
+            "/users/ngun7t/anaconda3/envs/maxatac/lib/python3.9/site-packages/maxatac/architectures/transformers.py",
+            os.path.join(args.output, "transformers.py")
+        )
     
     logging.error("Import training regions")
 

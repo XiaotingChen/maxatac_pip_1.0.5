@@ -1,8 +1,8 @@
 #!/bin/bash
 
-tf="TCF7L2"           # example: CTCF
+tf="LEF1"           # example: CTCF
 model_dir="$MYTEAM/maxatac/runs/rpe_$tf"    # example: /data/weirauchlab/team/ngun7t/maxatac/runs/run-transformer-4
-cell_line="GM12878"    # example: GM12878
+cell_line="A549"    # example: GM12878
 chromosomes="chr1"  # example: chr1
 gold_standard="$MYTEAM/maxatac/training_data/ChIP_Peaks/ChIP_Peaks/${cell_line}__$tf.bw"
 
@@ -40,21 +40,21 @@ maxatac train \\
 
 best_model=\$(cat ${model_dir}/*txt)
 
-#maxatac predict \\
-#--model \"\${best_model}\" \\
-#--train_json $model_dir/cmd_args.json \\
-#--signal $MYTEAM/maxatac/training_data/ATAC_Signal_File/ATAC_Signal_File/${cell_line}_RP20M_minmax_percentile99.bw \\
-#--batch_size 100 \\
-#--chromosomes $chromosomes \\
-#--prefix ${tf}_${cell_line}_${chromosomes} \\
-#--multiprocessing False \\
-#--output ${model_dir}/prediction
-#
-#maxatac benchmark \\
-#--prediction ${model_dir}/prediction/${tf}_${cell_line}_${chromosomes}.bw \\
-#--gold_standard ${gold_standard} \\
-#--prefix ${tf}_${cell_line}_${chromosomes} \\
-#--chromosomes $chromosomes \\
-#--output ${model_dir}/benchmark"
+maxatac predict \\
+--model \"\${best_model}\" \\
+--train_json $model_dir/cmd_args.json \\
+--signal $MYTEAM/maxatac/training_data/ATAC_Signal_File/ATAC_Signal_File/${cell_line}_RP20M_minmax_percentile99.bw \\
+--batch_size 100 \\
+--chromosomes $chromosomes \\
+--prefix ${tf}_${cell_line}_${chromosomes} \\
+--multiprocessing False \\
+--output ${model_dir}/prediction
+
+maxatac benchmark \\
+--prediction ${model_dir}/prediction/${tf}_${cell_line}_${chromosomes}.bw \\
+--gold_standard ${gold_standard} \\
+--prefix ${tf}_${cell_line}_${chromosomes} \\
+--chromosomes $chromosomes \\
+--output ${model_dir}/benchmark"
 
 echo "$job" | bsub

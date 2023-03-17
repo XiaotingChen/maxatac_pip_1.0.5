@@ -12,20 +12,24 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import glob
 import ntpath
-from maxatac.utilities.system_tools import get_dir, Mute
+from sklearn.metrics import precision_recall_curve, confusion_matrix
+
+from maxatac.utilities.system_tools import Mute
+with Mute():
+    from tensorflow.keras.models import load_model
+    from maxatac.utilities.training_tools import DataGenerator, ROIPool
+    from maxatac.utilities.genome_tools import load_bigwig
 
 with Mute():
     import tensorflow as tf
-    from tensorflow.keras.models import load_model
     from tensorflow.keras.utils import plot_model
-    from maxatac.utilities.genome_tools import build_chrom_sizes_dict
-    from maxatac.utilities.prediction_tools import write_predictions_to_bigwig, \
-        import_prediction_regions, create_prediction_regions, make_stranded_predictions, PredictionDataGenerator
-    from maxatac.utilities.constants import DATA_PATH, INPUT_CHANNELS
-    from maxatac.analyses.peaks import run_call_peaks
-    from maxatac.architectures.dcnn import get_dilated_cnn, get_dilated_cnn_with_attention, dice_coef
+    from maxatac.utilities.genome_tools import build_chrom_sizes_dict, chromosome_blacklist_mask
+    from maxatac.utilities.prediction_tools import create_prediction_regions, PredictionDataGenerator
+    from maxatac.architectures.dcnn import get_dilated_cnn, get_dilated_cnn_with_attention
     from maxatac.architectures.transformers import get_transformer
-    from maxatac.utilities.constants import TRAIN_SCALE_SIGNAL, BLACKLISTED_REGIONS, DEFAULT_CHROM_SIZES, INPUT_LENGTH
+    from maxatac.utilities.constants import TRAIN_SCALE_SIGNAL, BLACKLISTED_REGIONS, DEFAULT_CHROM_SIZES, INPUT_LENGTH, \
+                                            DATA_PATH, INPUT_CHANNELS, DEFAULT_BENCHMARKING_BIN_SIZE, DEFAULT_BENCHMARKING_AGGREGATION_FUNCTION, \
+                                            BLACKLISTED_REGIONS_BIGWIG
 
 def phuc_func(args):
     if args.summary != "":
@@ -38,8 +42,10 @@ def phuc_func(args):
         debug_model_architectures(args.debug_forward_pass_model)
     if args.ablation_random_genome_file != "":
         ablation_random_genome(args.ablation_random_genome_file)
-    if args.compare_training_and_zorn:
-        visualize_zorn_atac()
+    if args.compare_training_and_zorn != []:
+        visualize_zorn_atac(args.compare_training_and_zorn)
+    if args.count_peaks != []:
+        peak_analysis(args.count_peaks)
 
 def prepare_metafile(data_dir):
     """
@@ -209,66 +215,207 @@ def _get_generator(signal, chromosome):
                                              use_complement=False)
     return data_generator
 
+def _get_atac_data(chromosome, cell_type, dataset):
+    """
+    Get atac data
+    """
+    def meta_file_selection(dataset, cell_type):
 
-def visualize_zorn_atac():
+        if dataset == "train":
+            df_lef1 = pd.read_csv(os.path.join(base_dir, "meta_file_LEF1.tsv"), sep="\t")
+            df_tcf7 = pd.read_csv(os.path.join(base_dir, "meta_file_TCF7.tsv"), sep="\t")
+            df_tcf7l2 = pd.read_csv(os.path.join(base_dir, "meta_file_TCF7L2.tsv"), sep="\t")
+            if cell_type in df_lef1["Cell_Line"].unique().tolist():
+                return os.path.join(base_dir, "meta_file_LEF1.tsv")
+            elif cell_type in df_tcf7["Cell_Line"].unique().tolist():
+                return os.path.join(base_dir, "meta_file_TCF7.tsv")
+            else:
+                return os.path.join(base_dir, "meta_file_TCF7L2.tsv")
+        
+        else:
+            return "/data/weirauchlab/team/ngun7t/maxatac/meta_file_for_interpreting_LEF1.tsv"
+
+    batch_size = 10000
+    base_dir = "/data/weirauchlab/team/ngun7t/maxatac/training_data"
+
+    df_dir = meta_file_selection(dataset, cell_type)
+    train_examples = ROIPool(chroms=[chromosome],
+                            roi_file_path=None,
+                            meta_file=df_dir,
+                            prefix="transformer",
+                            output_directory="/data/weirauchlab/team/ngun7t/maxatac/runs/data_viz",
+                            shuffle=True,
+                            tag="training")
+    
+    df = pd.read_csv(df_dir, sep="\t")
+    train_gen = DataGenerator(sequence="/users/ngun7t/opt/maxatac/data/hg38/hg38.2bit",
+                            meta_table=df,
+                            roi_pool=train_examples.ROI_pool,
+                            cell_type_list=[cell_type],
+                            rand_ratio=0,
+                            chroms=[chromosome],
+                            batch_size=batch_size,
+                            shuffle_cell_type=False,
+                            rev_comp_train=False
+                            )
+
+    return train_gen
+    
+
+def visualize_zorn_atac(args):
     """
     Visualize Zorn's normalized ATAC-seq data to see if it's out of distribution
     """
     # Let's see if we can plot all ATAC-seq signals in one run
     # We have one ATAC-seq for each cell type
     # Plot the histogram of max ATAC-seq peaks for the training data and the Zorn dataset
-    zorn_train_cell_types = [
-        "HEK293T",
-        "K562",
-        "HepG2",
-        "GM12878",
-        "MCF-7",
-        "Panc1",
-        "HEK293",
-    ]
+    mode = args[0]
+    zorn_train_cell_types = [args[1]]
+    zorn_cell_types = [args[2]]
+
     training_atac_dir = "/data/weirauchlab/team/ngun7t/maxatac/training_data/ATAC_Signal_File/ATAC_Signal_File"
     zorn_atac_dir = "/data/weirauchlab/team/ngun7t/maxatac/zorn/Zorn_hESC_ATAC/outputs"
     training_atac = [os.path.join(training_atac_dir, n) for n in os.listdir(training_atac_dir) if n.split("_")[0] in zorn_train_cell_types]
     zorn_atac = glob.glob(f"{zorn_atac_dir}/*/maxatac/normalize_bigwig/*.bw")
     save_dir = "/data/weirauchlab/team/ngun7t/maxatac/runs/data_viz"
     chromosome = "chr1"
+    threshold = 4
+    num_samples = 5000
+    os.makedirs(f"{save_dir}/max_atac_peaks_2dhist_{threshold}_{mode}_{chromosome}", exist_ok=True)
+
+    # Just for debugging
+    zorn_atac = [i for i in zorn_atac if ntpath.basename(i).split(".")[0] in zorn_cell_types]
 
     # Borrow the code from ablation_random_genome for creating the generator
-    fig, axes = plt.subplots(ncols=4, nrows=4, figsize=(30, 20))
-    axes = axes.ravel()
+    #fig, axes = plt.subplots(ncols=4, nrows=4, figsize=(30, 20))
+    #axes = axes.ravel()
+
+    # Create all pairs of (training-zorn)
+    pairs = [(i, j) for i in range(len(training_atac)) for j in range(len(zorn_atac))]
+    
+    # Create a list of data inputs
+    train_max_peaks = []
+    zorn_max_peaks = []
+
+    print("Working on training set")
+    for i, tr_atac in enumerate(training_atac):
+        if threshold == -1:
+            print(f">>> Working on {zorn_train_cell_types[i]}")
+            data_generator = _get_generator(tr_atac, chromosome)
+            inputs = next(iter(data_generator))
+            total_atac = inputs[:, :, -1]
+            max_atac_signals = np.max(total_atac, axis=1)
+            train_max_peaks.append(max_atac_signals)
+        else:
+            print(f">>> Working on {zorn_train_cell_types[i]}")
+            data_generator = _get_atac_data(chromosome, zorn_train_cell_types[i], "train")
+            samples_collected = 0
+            data = np.zeros((num_samples,)) - 1
+            
+            while samples_collected <= num_samples:
+
+                input_data, target_data = next(iter(data_generator))
+
+                # only get the indices with some greater value
+                target_sum = np.sum(target_data, axis=1)
+                if (mode=="peak"):
+                    inds = np.where(target_sum > threshold)[0]
+                elif (mode=="non_peak"):
+                    inds = np.where(target_sum==0)[0]
+                max_atac_peaks = np.max(input_data[:, :, -1], axis=1)[inds]
+                
+                # add the value to data
+                if samples_collected + max_atac_peaks.size <= num_samples:
+                    data[samples_collected:samples_collected+max_atac_peaks.size] = max_atac_peaks
+                else:
+                    diff = samples_collected + max_atac_peaks.size - num_samples
+                    print(f"samples_collected: {samples_collected}, diff: {diff}, size: {max_atac_peaks.size}")
+                    data[samples_collected:] = max_atac_peaks[:max_atac_peaks.size-diff]
+                
+                samples_collected += max_atac_peaks.size
+                print(f">>> Current collected samples: {samples_collected}")
+                
+            train_max_peaks.append(data)
+
+    print("Working on zorn dataset")
+    for i, zo_atac in enumerate(zorn_atac):
+        if threshold == -1:
+            print(f">>> Working on {zorn_cell_types[i]}")
+            data_generator = _get_generator(zo_atac, chromosome)
+            inputs = next(iter(data_generator))
+            total_atac = inputs[:, :, -1]
+            max_atac_signals = np.max(total_atac, axis=1)
+            zorn_max_peaks.append(max_atac_signals)
+        else:
+            print(f">>> Working on {zorn_cell_types[i]}")
+            data_generator = _get_atac_data(chromosome, zorn_cell_types[i], "zorn")
+            samples_collected = 0
+            data = np.zeros((num_samples,)) - 1
+            
+            while samples_collected <= num_samples:
+
+                input_data, target_data = next(iter(data_generator))
+
+                # only get the indices with some greater value
+                target_sum = np.sum(target_data, axis=1)
+                if (mode=="peak"):
+                    inds = np.where(target_sum > threshold)[0]
+                elif (mode=="non_peak"):
+                    inds = np.where(target_sum==0)[0]
+                max_atac_peaks = np.max(input_data[:, :, -1], axis=1)[inds]
+                
+                # add the value to data
+                if samples_collected + max_atac_peaks.size <= num_samples:
+                    data[samples_collected:samples_collected+max_atac_peaks.size] = max_atac_peaks
+                else:
+                    diff = samples_collected + max_atac_peaks.size - num_samples
+                    print(f"samples_collected: {samples_collected}, diff: {diff}, size: {max_atac_peaks.size}")
+                    data[samples_collected:] = max_atac_peaks[:max_atac_peaks.size-diff]
+                samples_collected += max_atac_peaks.size
+                print(f">>> Current collected samples: {samples_collected}")
+
+            zorn_max_peaks.append(data)
+
+    # Loop through the pairs and create the relevant plots
+
+    for tr, zo in pairs:
+        plt.figure()
+        sns.jointplot(x=train_max_peaks[tr], y=zorn_max_peaks[zo])
+        tr_cell_type = ntpath.basename(training_atac[tr]).split("_")[0]
+        zo_cell_type = ntpath.basename(zorn_atac[zo]).split(".")[0]
+        plt.xlabel(tr_cell_type)
+        plt.ylabel(zo_cell_type)
+        plt.savefig(f"{save_dir}/max_atac_peaks_2dhist_{threshold}_{mode}_{chromosome}/{tr_cell_type}.{zo_cell_type}.{threshold}.png")
+        plt.close()
 
     # for training
-    for i, tr_atac in enumerate(training_atac):
-        file_name = ntpath.basename(tr_atac)
-        cell_type = file_name.split("_")[0]
-        data_generator = _get_generator(tr_atac, chromosome)
-        inputs = next(iter(data_generator))
-        total_atac = inputs[:, :, -1]
-
-        # Plot the ATAC-seq max signal histogram
-        max_atac_signals = np.max(total_atac, axis=1)
-        sns.histplot(data=max_atac_signals, ax=axes[i])
-        axes[i].set_title(f"training_{cell_type}")
-    
-    # for zorn
-    for i, zo_atac in enumerate(zorn_atac):
-        file_name = ntpath.basename(zo_atac)
-        cell_type = file_name.split("_")[0]
-        data_generator = _get_generator(zo_atac, chromosome)
-        inputs = next(iter(data_generator))
-        total_atac = inputs[:, :, -1]
-
-        # Plot the ATAC-seq max signal histogram
-        max_atac_signals = np.max(total_atac, axis=1)
-        sns.histplot(data=max_atac_signals, ax=axes[i + 8])
-        axes[i + 8].set_title(f"zorn_{cell_type}")
-
-    axes[7].remove()
-    axes[15].remove()
-
-    plt.tight_layout()
-    plt.savefig(f"{save_dir}/train_vs_zorn_max_atac_peaks_{chromosome}.png")
-
+    #for i, tr_atac in enumerate(training_atac):
+    #    file_name = ntpath.basename(tr_atac)
+    #    cell_type = file_name.split("_")[0]
+    #    data_generator = _get_generator(tr_atac, chromosome)
+    #    inputs = next(iter(data_generator))
+    #    total_atac = inputs[:, :, -1]
+#
+    #    # Plot the ATAC-seq max signal histogram
+    #    max_atac_signals = np.max(total_atac, axis=1)
+    #    sns.histplot(data=max_atac_signals, ax=axes[i])
+    #    axes[i].set_title(f"training_{cell_type}")
+    #
+    ## for zorn
+    #for i, zo_atac in enumerate(zorn_atac):
+    #    file_name = ntpath.basename(zo_atac)
+    #    cell_type = file_name.split("_")[0]
+    #    data_generator = _get_generator(zo_atac, chromosome)
+    #    inputs = next(iter(data_generator))
+    #    total_atac = inputs[:, :, -1]
+#
+    #    # Plot the ATAC-seq max signal histogram
+    #    max_atac_signals = np.max(total_atac, axis=1)
+    #    sns.histplot(data=max_atac_signals, ax=axes[i + 8])
+    #    axes[i + 8].set_title(f"zorn_{cell_type}")
+#
+    #axes[7].remove()
+    #axes[15].remove()
 
 def ablation_random_genome(metadata_file):
     """
@@ -500,3 +647,76 @@ def ablation_random_genome(metadata_file):
     plt.title("Change of output with random genome sequence")
     plt.savefig(os.path.join(folder_full_dir, f"{cell_line}_{tf}_{chromosome}_boxplot_genome.png"))
     print("Done")
+
+
+def peak_analysis(args):
+    """
+    This function does some of the following:
+        - Load the bigwig files with the same methods as the benchmark code
+        - Decide peaks based on a certain threshold
+        - Generate a confusion matrix file
+        - Create a bw file or bed file containing false pos and false neg peaks
+    """
+    bw_pred, bw_gold, con_mat_csv = args
+    def bw_preprocess(signal_pred, signal_gold, chromosome, chrom_length):
+        bin_size = DEFAULT_BENCHMARKING_BIN_SIZE
+        agg_func = DEFAULT_BENCHMARKING_AGGREGATION_FUNCTION
+        recall_range = [0.049, 0.051]
+
+        bin_count = int(int(chrom_length) / int(bin_size))
+        blacklist_bw = BLACKLISTED_REGIONS_BIGWIG
+        blacklist_mask = chromosome_blacklist_mask(blacklist_bw,
+                                                chromosome,
+                                                chrom_length,
+                                                bin_count)
+        pred_arr = np.nan_to_num(
+            np.array(
+                signal_pred.stats(chromosome, 0, chrom_length, type=agg_func, nBins=bin_count, exact=True),
+                dtype=float
+            )
+        )
+        gold_arr = np.nan_to_num(
+            np.array(
+                signal_gold.stats(chromosome, 0, chrom_length, type=agg_func, nBins=bin_count, exact=True),
+                dtype=float
+            )
+        ) > 0
+
+        pred_arr = pred_arr[blacklist_mask]
+        gold_arr = gold_arr[blacklist_mask]
+
+        precision, recall, thresholds = precision_recall_curve(gold_arr, pred_arr)
+        df = pd.DataFrame(
+            {'Precision': precision[:-1], 'Recall': recall[:-1], "Threshold": thresholds})
+        df_recall_range = df[(df["Recall"] < recall_range[1]) & (df["Recall"] > recall_range[0])]
+        threshold = df_recall_range["Threshold"].median()
+
+        # a better way is to keep a list of the thresholds, then run this for all of the thresholds
+        pred_arr[pred_arr >= threshold] = 1
+        pred_arr[pred_arr < threshold] = 0
+
+        return (pred_arr, gold_arr)
+    
+    chrom = "chr1"
+
+    bw_gold_file = load_bigwig(bw_gold)
+    chrom_length = bw_gold_file.chroms(chrom)
+
+    bw_pred_file = load_bigwig(bw_pred)
+    chrom_length = bw_pred_file.chroms(chrom)
+
+    # Get the preprocessed bw for creating confusion matrix
+    rpe, zorn = bw_preprocess(bw_pred_file, bw_gold_file, chrom, chrom_length)
+
+    # for debugging
+    #with open(f"/data/weirauchlab/team/ngun7t/maxatac/runs/data_viz/csv_con_mat/{ntpath.basename(con_mat_csv)[0]}rpe.npy", "wb") as f:
+    #    np.save(f, rpe)
+    #with open(f"/data/weirauchlab/team/ngun7t/maxatac/runs/data_viz/csv_con_mat/{ntpath.basename(con_mat_csv)[0]}zorn.npy", "wb") as f:
+    #    np.save(f, zorn)
+
+    # Get confusion matrix
+    tn, fp, fn, tp = confusion_matrix(zorn, rpe).ravel()
+    new_data_row = pd.DataFrame(data=np.array([[bw_pred, bw_gold, tp, tn, fp, fn]]), columns=["Pred", "Gold", "TP", "TN", "FP", "FN"])
+    new_data_row.to_csv(con_mat_csv, index=False)
+
+    

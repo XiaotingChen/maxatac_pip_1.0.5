@@ -1,7 +1,7 @@
-#BSUB -W 24:00
-#BSUB -n 12
-#BSUB -M 80000
-#BSUB -R "span[hosts=1]"
+#BSUB -W 4:00
+#BSUB -n 2
+#BSUB -M 32000
+#BSUB -R "span[ptiles=2]"
 #BSUB -e logs/benchmark_%J.err
 #BSUB -o logs/benchmark_%J.out
 
@@ -15,7 +15,7 @@ source activate maxatac
 cd /data/weirauchlab/team/ngun7t/maxatac/runs
 
 # the main command
-maxatac benchmark --prediction /data/weirauchlab/team/ngun7t/maxatac/zorn/Zorn_hESC_ATAC/outputs/D1_mesendoderm/maxatac/predictions/LEF1/D1_mesendoderm_LEF1.bw \
---gold_standard /data/weirauchlab/team/ngun7t/maxatac/zorn/Zorn_hESC_CHIP/outputs/temp/D1_mesendoderm_LEF1_peaks.bw \
+maxatac benchmark --prediction /data/weirauchlab/team/ngun7t/maxatac/runs/rpe_TCF7/prediction_zorn/TCF7_D3_neuromesodermal_progenitors_SOX2KD_chr1.bw \
+--gold_standard /data/weirauchlab/team/ngun7t/maxatac/zorn/Zorn_hESC_CHIP/outputs/biorep_peaks_cat/gold_standard_bigwig/D3_definitive_endoderm_WT_TCF7.bw \
 --prefix maxatac_benchmark \
 --chromosomes chr1

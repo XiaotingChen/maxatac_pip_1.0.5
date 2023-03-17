@@ -1,6 +1,8 @@
+#!/bin/bash
+
 gold_standard_dir="/data/weirauchlab/team/ngun7t/maxatac/zorn/Zorn_hESC_CHIP/outputs/biorep_peaks_cat/gold_standard_bigwig"
 maxatac_pred_base_dir="/data/weirauchlab/team/ngun7t/maxatac/zorn/Zorn_hESC_ATAC/outputs"
-chromosomes="chr8"
+chromosomes="chr1"
 base_output_dir="/data/weirauchlab/team/ngun7t/maxatac/runs/benchmarking_results_"$chromosomes
 
 

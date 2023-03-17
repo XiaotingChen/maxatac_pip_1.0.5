@@ -85,8 +85,14 @@ DEFAULT_VALIDATE_RAND_RATIO = .7
 ############################ CONFIGS FOR INTER FUSION #############################
 INTER_FUSION = False
 CONV_TOWER_CONFIGS_FUSION = {
-    "genome": [{"num_layer": 2, "kernel": 10, "stride": 1, "padding": "same", "num_filters": 32, "activation": "relu"}],
-    "atac": [{"num_layer": 2, "kernel": 10, "stride": 1, "padding": "same", "num_filters": 32, "activation": "relu"}],
+    "genome": [
+        {"num_layer": 1, "kernel": 10, "stride": 1, "padding": "same", "num_filters": 64, "activation": "relu"},
+        {"num_layer": 1, "kernel": 10, "stride": 1, "padding": "same", "num_filters": 64, "activation": "relu"}
+    ],
+    "atac": [
+        {"num_layer": 1, "kernel": 10, "stride": 1, "padding": "same", "num_filters": 64, "activation": "relu"},
+        {"num_layer": 1, "kernel": 10, "stride": 1, "padding": "same", "num_filters": 64, "activation": "relu"}
+    ],
     "merge": {"num_layer": 1, "kernel": 10, "stride": 1, "padding": "same", "num_filters": 64, "activation": "relu"}
 }
 ###################################################################################

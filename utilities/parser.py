@@ -22,6 +22,7 @@ with Mute():
     from maxatac.analyses.prepare import run_prepare
     from maxatac.analyses.threshold import run_thresholding
     from maxatac.analyses.data import run_data
+    from maxatac.analyses.transformer_interpret import run_transformer_interpret
 
 from maxatac.utilities.phuc_utilities import phuc_func
 from maxatac.utilities.constants import (DEFAULT_TRAIN_VALIDATE_CHRS,
@@ -106,10 +107,32 @@ def get_parser():
     phuc_parser.add_argument("--ablation_random_genome_file", type=str, default="", required=False,
                             help="Perform ablation study on the genome"
                             )
-    phuc_parser.add_argument("--compare_training_and_zorn", type=bool, default=False, required=False,
-                            help="Make visualizations to compare training and Zorn dataset"
+    phuc_parser.add_argument("--compare_training_and_zorn", nargs="+", default=[], required=False,
+                            help="Make visualizations to compare training and Zorn dataset. Pass in 3 values: peak or non-peak, name of train cell type, name of zorn cell type"
+                            )
+    phuc_parser.add_argument("--count_peaks", nargs="+", default=[], required=False,
+                            help="Count peaks and the confusion matrix for bigwig files"
                             )
     phuc_parser.add_argument("--loglevel",
+                                dest="loglevel",
+                                type=str,
+                                default=LOG_LEVELS[DEFAULT_LOG_LEVEL],
+                                choices=LOG_LEVELS.keys(),
+                                help="Logging level. Default: " + DEFAULT_LOG_LEVEL
+                                )
+    
+    #############################################
+    # Transformer interpretability subparser
+    #############################################
+    transformer_parser = subparsers.add_parser("transformer", parents=[parent_parser], help="Run Phuc's functions")
+    transformer_parser.set_defaults(func=run_transformer_interpret)
+    transformer_parser.add_argument("--analysis", type=str, default="", required=True, help="Name of the analysis to run")
+    transformer_parser.add_argument("--chromosome", type=str, default="chr1", help="Chromosome")
+    transformer_parser.add_argument("--meta_file", type=str, default="", help="Meta file for running analysis")
+    transformer_parser.add_argument("--output_dir", type=str, default="", help="Output dir")
+    transformer_parser.add_argument("--cell_type", type=str, default="", help="Cell type")
+    transformer_parser.add_argument("--model_base_dir", type=str, default="", help="The directory containing the model")
+    transformer_parser.add_argument("--loglevel",
                                 dest="loglevel",
                                 type=str,
                                 default=LOG_LEVELS[DEFAULT_LOG_LEVEL],
