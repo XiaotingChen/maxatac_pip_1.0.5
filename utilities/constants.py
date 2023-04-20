@@ -81,27 +81,120 @@ DEFAULT_ADAM_LEARNING_RATE = 0.001
 DEFAULT_ADAM_DECAY = 1e-5
 DEFAULT_VALIDATE_RAND_RATIO = .7
 
+DOWNSAMPLE_METHOD_CONV_TOWER = "maxpooling"
 # True if using intermediate fusion of ATAC-seq
-############################ CONFIGS FOR INTER FUSION #############################
-INTER_FUSION = False
+############################ CONFIGS FOR INTER FUSION (old version) #############################
+INTER_FUSION = True
 CONV_TOWER_CONFIGS_FUSION = {
     "genome": [
+        #{"num_layer": 2, "kernel": 10, "stride": 1, "padding": "same", "num_filters": 64, "activation": "relu"},
         {"num_layer": 1, "kernel": 10, "stride": 1, "padding": "same", "num_filters": 64, "activation": "relu"},
         {"num_layer": 1, "kernel": 10, "stride": 1, "padding": "same", "num_filters": 64, "activation": "relu"}
     ],
     "atac": [
+        #{"num_layer": 2, "kernel": 10, "stride": 1, "padding": "same", "num_filters": 64, "activation": "relu"},
         {"num_layer": 1, "kernel": 10, "stride": 1, "padding": "same", "num_filters": 64, "activation": "relu"},
         {"num_layer": 1, "kernel": 10, "stride": 1, "padding": "same", "num_filters": 64, "activation": "relu"}
     ],
-    "merge": {"num_layer": 1, "kernel": 10, "stride": 1, "padding": "same", "num_filters": 64, "activation": "relu"}
+    #"merge": {"num_layer": 1, "kernel": 10, "stride": 1, "padding": "same", "num_filters": 64, "activation": "relu"}
+    "merge": {}
 }
 ###################################################################################
+
+############################ CONFIGS FOR INTER FUSION (Enformer conv tower) #############################
+GENOME_CONV_TOWER = (
+    # Stem config
+    {
+        "conv": {"num_filters": 16, "kernel": 10, "padding": "same", "stride": 1},
+        "rconv": {"num_filters": 16, "kernel": 10, "padding": "same", "stride": 1},
+        "maxpool": {"pool_size": 10, "strides": 1, "padding": "same"}
+    },
+    # ConvBlock config
+    [
+        {"num_filters": 64, "kernel": 10, "padding": "same", "stride": 1},
+        {"num_filters": 64, "kernel": 10, "padding": "same", "stride": 1}
+    ],
+    # RConvBlock config
+    [
+        {"num_filters": 64, "kernel": 10, "padding": "same", "stride": 1},
+        {"num_filters": 64, "kernel": 10, "padding": "same", "stride": 1}
+    ],
+    # Maxpool config
+    [
+        {"pool_size": 64, "padding": "same", "strides": 2},
+        {"pool_size": 64, "padding": "same", "strides": 2}
+    ]
+)
+ATAC_CONV_TOWER = GENOME_CONV_TOWER
+
+###################################################################################
+################### CONFIGS FOR INTER FUSION CROSS ATTENTION ######################
+CONV_TOWER_CROSSATT_CONFIGS_FUSION = {
+    "genome": [
+        {"num_layer": 2, "kernel": 10, "stride": 1, "padding": "same", "num_filters": 64, "activation": "relu"},
+    ],
+    "signal": [
+        {"num_layer": 2, "kernel": 10, "stride": 1, "padding": "same", "num_filters": 64, "activation": "relu"},
+    ],
+}
+DOWNSAMPLE_METHOD_CONV_TOWER_CROSSATT = "None"
+USE_TOKEN = True
+NUM_HEADS_SELFATT = 4
+EMBEDDING_SIZE_SELFATT = 64
+NUM_MHA_SELFATT = 4
+WHOLE_ATTENTION_KWARGS_SELFATT_GENOME = {
+    "attention_dropout_rate": 0.05,
+    "num_heads": NUM_HEADS_SELFATT,
+    "value_size": EMBEDDING_SIZE_SELFATT // NUM_HEADS_SELFATT,  #
+    "key_size": EMBEDDING_SIZE_SELFATT // NUM_HEADS_SELFATT,  #
+    "num_relative_position_features": None,  # channels // num_heads,
+    "positional_dropout_rate": 0.01,
+    "relative_position_symmetric": True,
+    "relative_position_functions": [ # leave these here although they are not used
+        "positional_features_exponential",
+        "positional_features_central_mask",
+        "positional_features_gamma",
+        #'positional_features_cosine',
+        #'positional_features_linear_masks',
+        #'positional_features_sin_cos',
+    ],
+    "relative_positions": True,  
+    "scaling": True,
+    "initializer": "GlorotNormal", # better to define the initializer here
+    "zero_initialize": True,
+}
+NUM_HEADS_CROSSATT = 4
+EMBEDDING_SIZE_CROSSATT = 64
+NUM_MHA_CROSSATT = 4
+WHOLE_ATTENTION_KWARGS_CROSSATT_SIGNAL = {
+    "attention_dropout_rate": 0.05,
+    "num_heads": NUM_HEADS_CROSSATT,
+    "value_size": EMBEDDING_SIZE_CROSSATT // NUM_HEADS_CROSSATT,  #
+    "key_size": EMBEDDING_SIZE_CROSSATT // NUM_HEADS_CROSSATT,  #
+    "num_relative_position_features": None,  # channels // num_heads,
+    "positional_dropout_rate": 0.01,
+    "relative_position_symmetric": True,
+    "relative_position_functions": [
+        "positional_features_exponential",
+        "positional_features_central_mask",
+        "positional_features_gamma",
+        #'positional_features_cosine',
+        #'positional_features_linear_masks',
+        #'positional_features_sin_cos',
+    ],
+    "relative_positions": True,  
+    "scaling": True,
+    "initializer": "GlorotNormal", # better to define the initializer here
+    "zero_initialize": True,
+}
+
+###################################################################################
+
 
 # Constants for the conv tower before MHA (key is number of conv layers, value is number of filters)
 CONV_TOWER_CONFIGS = [
     {"num_layer": 2, "kernel": 10, "stride": 1, "padding": "same", "num_filters": 64, "activation": "relu"}
 ]
-DOWNSAMPLE_METHOD_CONV_TOWER = "conv"
 
 # Constants for the Inception module (nearly all branches have a 1x1 conv block first)
 INCEPTION_BRANCHES = [

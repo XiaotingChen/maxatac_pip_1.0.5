@@ -18,6 +18,7 @@ from maxatac.utilities import constants
 from maxatac.architectures.dcnn import get_dilated_cnn, get_dilated_cnn_with_attention
 from maxatac.architectures.transformers import get_transformer
 from maxatac.architectures.multiinput_transformers import get_multiinput_transformer
+from maxatac.architectures.multiinput_crossatt_transformers import get_multiinput_crossatt_transformer
 from maxatac.utilities.constants import BP_RESOLUTION, BATCH_SIZE, CHR_POOL_SIZE, INPUT_LENGTH, INPUT_CHANNELS, \
     BP_ORDER, TRAIN_SCALE_SIGNAL, BLACKLISTED_REGIONS, DEFAULT_CHROM_SIZES, INTER_FUSION
 from maxatac.utilities.genome_tools import load_bigwig, load_2bit, get_one_hot_encoded, build_chrom_sizes_dict
@@ -80,6 +81,8 @@ class MaxATACModel(object):
 
         # Set the random seed for the model
         random.seed(seed)
+        np.random.seed(seed)
+        tf.random.set_seed(seed)
 
         # Import meta txt as dataframe
         self.meta_dataframe = pd.read_csv(self.meta_path, sep='\t', header=0, index_col=None)
@@ -130,6 +133,12 @@ class MaxATACModel(object):
                     output_activation=self.output_activation,
                     target_scale_factor=self.target_scale_factor,
                     dense_b=self.dense,
+                    weights=self.weights
+                )
+        elif self.arch == "Crossatt_transformer":
+            assert INTER_FUSION, "This architecture only works with split inputs!"
+            return get_multiinput_crossatt_transformer(
+                    output_activation=self.output_activation,
                     weights=self.weights
                 )
         else:
@@ -812,7 +821,6 @@ class GenomicRegions(object):
                          header=None,
                          names=["Chr", "Start", "Stop"],
                          low_memory=False)
-
         # Make sure the chromosomes in the ROI file frame are in the target chromosome list
         df = df[df["Chr"].isin(self.chromosomes)]
 

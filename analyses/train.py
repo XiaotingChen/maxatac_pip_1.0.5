@@ -54,14 +54,20 @@ def run_training(args):
     gpus = tensorflow.config.list_physical_devices('GPU')
     if gpus:
         try:
+            print(gpus)
             # Currently, memory growth needs to be the same across GPUs
-            for gpu in gpus:
-                tensorflow.config.experimental.set_memory_growth(gpu, True)
+            #for gpu in gpus:
+            #    tensorflow.config.experimental.set_memory_growth(gpu, True)
             logical_gpus = tensorflow.config.list_logical_devices('GPU')
-            logging.error(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
+            logging.error(f"{len(gpus)} Physical GPUs, {len(logical_gpus)}, Logical GPUs")
         except RuntimeError as e:
             # Memory growth must be set before GPUs have been initialized
             print(e)
+
+    if tensorflow.test.gpu_device_name():
+        print('GPU device found')
+    else:
+        print("No GPU found")
     
     # Start Timer
     startTime = timeit.default_timer()
@@ -92,11 +98,21 @@ def run_training(args):
         "/users/ngun7t/anaconda3/envs/maxatac/lib/python3.9/site-packages/maxatac/utilities/constants.py",
         os.path.join(args.output, "constants.py")
     )
+    shutil.copyfile(
+        "/users/ngun7t/anaconda3/envs/maxatac/lib/python3.9/site-packages/maxatac/architectures/attention_module_TF.py",
+        os.path.join(args.output, "attention_module_TF.py")
+    )
     if INTER_FUSION:
-        shutil.copyfile(
-            "/users/ngun7t/anaconda3/envs/maxatac/lib/python3.9/site-packages/maxatac/architectures/multiinput_transformers.py",
-            os.path.join(args.output, "multiinput_transformers.py")
-        )
+        if args.arch == "Crossatt_transformer":
+            shutil.copyfile(
+                "/users/ngun7t/anaconda3/envs/maxatac/lib/python3.9/site-packages/maxatac/architectures/multiinput_transformers.py",
+                os.path.join(args.output, "multiinput_crossatt_transformers.py")
+            )
+        else:
+            shutil.copyfile(
+                "/users/ngun7t/anaconda3/envs/maxatac/lib/python3.9/site-packages/maxatac/architectures/multiinput_transformers.py",
+                os.path.join(args.output, "multiinput_transformers.py")
+            )
     else:
         shutil.copyfile(
             "/users/ngun7t/anaconda3/envs/maxatac/lib/python3.9/site-packages/maxatac/architectures/transformers.py",
@@ -213,12 +229,12 @@ def run_training(args):
         export_binary_metrics(training_history, tf, RR, ARC, maxatac_model.results_location, best_epoch)
         export_model_structure(maxatac_model.nn_model, maxatac_model.results_location)
 
-        data_sample = tensorflow.expand_dims(input_batch[0], axis=0)
-        if not(USE_RPE):
-            mha_names = [f"Encoder_{i}_softmax_att_weights" for i in range(NUM_MHA)]
-        else:
-            mha_names = [f"Transformer_block_{i}" for i in range(NUM_MHA)]
-        plot_attention_weights(maxatac_model.nn_model, mha_names, data_sample, num_heads=NUM_HEADS, file_location=args.output)
+        #data_sample = tensorflow.expand_dims(input_batch[0], axis=0)
+        #if not(USE_RPE):
+        #    mha_names = [f"Encoder_{i}_softmax_att_weights" for i in range(NUM_MHA)]
+        #else:
+        #    mha_names = [f"Transformer_block_{i}" for i in range(NUM_MHA)]
+        #plot_attention_weights(maxatac_model.nn_model, mha_names, data_sample, num_heads=NUM_HEADS, file_location=args.output)
 
     logging.error("Results are saved to: " + maxatac_model.results_location)
     

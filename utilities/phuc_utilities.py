@@ -46,6 +46,8 @@ def phuc_func(args):
         visualize_zorn_atac(args.compare_training_and_zorn)
     if args.count_peaks != []:
         peak_analysis(args.count_peaks)
+    if args.atac_jointplot != []:
+        atac_signal_jointplot(args.atac_jointplot)
 
 def prepare_metafile(data_dir):
     """
@@ -265,6 +267,7 @@ def _get_atac_data(chromosome, cell_type, dataset):
 def visualize_zorn_atac(args):
     """
     Visualize Zorn's normalized ATAC-seq data to see if it's out of distribution
+    Legacy: this function will no longer be needed
     """
     # Let's see if we can plot all ATAC-seq signals in one run
     # We have one ATAC-seq for each cell type
@@ -420,6 +423,7 @@ def visualize_zorn_atac(args):
 def ablation_random_genome(metadata_file):
     """
     Keep ATACseq constant, randomize genome sequence, check if the prediction is driven by the genome or the ATACseq
+    Legacy: this function will no longer be needed
     """
     # Shuffle the genome
     def one_hot_encode(genome):
@@ -649,6 +653,63 @@ def ablation_random_genome(metadata_file):
     print("Done")
 
 
+def save_pred_as_numpy(args):
+    """
+    This function takes in the directory of 3 bigwig files: the prediction of the model of interest (pred_1),
+    the gold standard (gold), and the prediction of the baseline model (maxATAC) (pred_2)
+    The function then reads these bigwig files and saves them as numpy arrays using the same procedure as in
+    maxatac benchmark
+    """
+    bw_pred_1, bw_gold, bw_pred_2, save_dir, prefix, chrom = args
+
+    # Load the bigwig files
+    bw_gold = load_bigwig(bw_gold)
+    chrom_length = bw_gold.chroms(chrom)
+    bw_pred_1 = load_bigwig(bw_pred_1)
+    bw_pred_2 = load_bigwig(bw_pred_2)
+
+    # Define the constants
+    bin_size = DEFAULT_BENCHMARKING_BIN_SIZE
+    agg_func = DEFAULT_BENCHMARKING_AGGREGATION_FUNCTION
+    bin_count = int(int(chrom_length) / int(bin_size))
+    blacklist_bw = BLACKLISTED_REGIONS_BIGWIG
+    blacklist_mask = chromosome_blacklist_mask(blacklist_bw,
+                                            chrom,
+                                            chrom_length,
+                                            bin_count)
+    
+    # Load the bigwig files into numpy arrays
+    gold_arr = np.nan_to_num(
+        np.array(
+            bw_gold.stats(chrom, 0, chrom_length, type=agg_func, nBins=bin_count, exact=True),
+            dtype=float
+        )
+    ) > 0
+    gold_arr = gold_arr[blacklist_mask]
+    pred1_arr = np.nan_to_num(
+        np.array(
+            bw_pred_1.stats(chrom, 0, chrom_length, type=agg_func, nBins=bin_count, exact=True),
+            dtype=float
+        )
+    )
+    pred1_arr = pred1_arr[blacklist_mask]
+    pred2_arr = np.nan_to_num(
+        np.array(
+            bw_pred_2.stats(chrom, 0, chrom_length, type=agg_func, nBins=bin_count, exact=True),
+            dtype=float
+        )
+    )
+    pred2_arr = pred2_arr[blacklist_mask]
+
+    os.makedirs(os.path.join(save_dir, "numpy"), exist_ok=True)
+    with open(os.path.join(save_dir, "numpy", f"{prefix}_gold.npy"), "wb") as f:
+        np.save(f, gold_arr)
+    with open(os.path.join(save_dir, "numpy", f"{prefix}_pred_1.npy"), "wb") as f:
+        np.save(f, pred1_arr)
+    with open(os.path.join(save_dir, "numpy", f"{prefix}_pred_1.npy"), "wb") as f:
+        np.save(f, pred2_arr)
+
+
 def peak_analysis(args):
     """
     This function does some of the following:
@@ -657,8 +718,9 @@ def peak_analysis(args):
         - Generate a confusion matrix file
         - Create a bw file or bed file containing false pos and false neg peaks
     """
-    bw_pred, bw_gold, con_mat_csv = args
-    def bw_preprocess(signal_pred, signal_gold, chromosome, chrom_length):
+    bw_pred, bw_gold, bw_pred_2, save_dir, prefix = args
+
+    def bw_preprocess(signal_pred, signal_gold, signal_pred_2, chromosome, chrom_length, save_numpy=True):
         bin_size = DEFAULT_BENCHMARKING_BIN_SIZE
         agg_func = DEFAULT_BENCHMARKING_AGGREGATION_FUNCTION
         recall_range = [0.049, 0.051]
@@ -669,21 +731,30 @@ def peak_analysis(args):
                                                 chromosome,
                                                 chrom_length,
                                                 bin_count)
-        pred_arr = np.nan_to_num(
-            np.array(
-                signal_pred.stats(chromosome, 0, chrom_length, type=agg_func, nBins=bin_count, exact=True),
-                dtype=float
-            )
-        )
+        
         gold_arr = np.nan_to_num(
             np.array(
                 signal_gold.stats(chromosome, 0, chrom_length, type=agg_func, nBins=bin_count, exact=True),
                 dtype=float
             )
         ) > 0
+        gold_arr = gold_arr[blacklist_mask]
+        
+        pred_arr = np.nan_to_num(
+            np.array(
+                signal_pred.stats(chromosome, 0, chrom_length, type=agg_func, nBins=bin_count, exact=True),
+                dtype=float
+            )
+        )
 
         pred_arr = pred_arr[blacklist_mask]
-        gold_arr = gold_arr[blacklist_mask]
+
+        if save_numpy:
+            os.makedirs(os.path.join(save_dir, "numpy"), exist_ok=True)
+            with open(os.path.join(save_dir, "numpy", f"{prefix}_gold.npy"), "wb") as f:
+                np.save(f, gold_arr)
+            with open(os.path.join(save_dir, "numpy", f"{prefix}_pred_1.npy"), "wb") as f:
+                np.save(f, pred_arr)
 
         precision, recall, thresholds = precision_recall_curve(gold_arr, pred_arr)
         df = pd.DataFrame(
@@ -695,28 +766,87 @@ def peak_analysis(args):
         pred_arr[pred_arr >= threshold] = 1
         pred_arr[pred_arr < threshold] = 0
 
-        return (pred_arr, gold_arr)
+        pred_arr_2 = None
+        if signal_pred_2 is not None:
+            pred_arr_2 = np.nan_to_num(
+                np.array(
+                    signal_pred_2.stats(chromosome, 0, chrom_length, type=agg_func, nBins=bin_count, exact=True),
+                    dtype=float
+                )
+            )
+            pred_arr_2 = pred_arr_2[blacklist_mask]
+            if save_numpy:
+                with open(os.path.join(save_dir, "numpy", f"{prefix}_pred_2.npy"), "wb") as f:
+                    np.save(f, pred_arr_2)
+
+            precision, recall, thresholds = precision_recall_curve(gold_arr, pred_arr_2)
+            df = pd.DataFrame(
+                {'Precision': precision[:-1], 'Recall': recall[:-1], "Threshold": thresholds})
+            df_recall_range = df[(df["Recall"] < recall_range[1]) & (df["Recall"] > recall_range[0])]
+            threshold = df_recall_range["Threshold"].median()
+
+            # a better way is to keep a list of the thresholds, then run this for all of the thresholds
+            pred_arr_2[pred_arr_2 >= threshold] = 1
+            pred_arr_2[pred_arr_2 < threshold] = 0
+ 
+
+        return (pred_arr, gold_arr, pred_arr_2)
     
     chrom = "chr1"
 
     bw_gold_file = load_bigwig(bw_gold)
     chrom_length = bw_gold_file.chroms(chrom)
-
     bw_pred_file = load_bigwig(bw_pred)
-    chrom_length = bw_pred_file.chroms(chrom)
+    if bw_pred_2 is not None:
+        bw_pred_file_2 = load_bigwig(bw_pred_2)
 
     # Get the preprocessed bw for creating confusion matrix
-    rpe, zorn = bw_preprocess(bw_pred_file, bw_gold_file, chrom, chrom_length)
-
-    # for debugging
-    #with open(f"/data/weirauchlab/team/ngun7t/maxatac/runs/data_viz/csv_con_mat/{ntpath.basename(con_mat_csv)[0]}rpe.npy", "wb") as f:
-    #    np.save(f, rpe)
-    #with open(f"/data/weirauchlab/team/ngun7t/maxatac/runs/data_viz/csv_con_mat/{ntpath.basename(con_mat_csv)[0]}zorn.npy", "wb") as f:
-    #    np.save(f, zorn)
+    pred_1, gold, pred_2 = bw_preprocess(bw_pred_file, bw_gold_file, bw_pred_file_2, chrom, chrom_length)
 
     # Get confusion matrix
-    tn, fp, fn, tp = confusion_matrix(zorn, rpe).ravel()
-    new_data_row = pd.DataFrame(data=np.array([[bw_pred, bw_gold, tp, tn, fp, fn]]), columns=["Pred", "Gold", "TP", "TN", "FP", "FN"])
-    new_data_row.to_csv(con_mat_csv, index=False)
+    tn1, fp1, fn1, tp1 = confusion_matrix(gold, pred_1).ravel()
+    data_rows = []
+    data_rows.append([bw_pred, bw_gold, None, tp1, tn1, fp1, fn1])
+
+    if pred_2 is not None:
+        tn2, fp2, fn2, tp2 = confusion_matrix(gold, pred_2).ravel()
+        data_rows.append([None, bw_gold, bw_pred_2, tp2, tn2, fp2, fn2])
+
+        tn3, fp3, fn3, tp3 = confusion_matrix(pred_1, pred_2).ravel()
+        data_rows.append([bw_pred, None, bw_pred_2, tp3, tn3, fp3, fn3])
+
+    df = pd.DataFrame(data=np.array(data_rows), columns=["Pred_1", "Gold", "Pred_2", "TP", "TN", "FP", "FN"])
+    os.makedirs(os.path.join(save_dir, "csv"), exist_ok=True)
+    df.to_csv(os.path.join(save_dir, "csv", f"{prefix}.csv"), index=False)
 
     
+def atac_signal_jointplot(output_dir):
+    """
+    Generate a jointplot that:
+        - The x-axis contains the value from 0 to 1024, equal to input vector size
+        - The y-axis contains the distribution of ATAC-seq signals
+    This method is used to visualize the distribution of ATAC-seq signals on each base
+    of the input vector
+    For example, we have a sample of N ATAC-seq tracks of (N, 1024)
+    We now can plot 1024 distributions of ATAC-seq signals, one for each base,
+    each dist containing N samples
+    """
+
+    # Currently in debug
+    with open("/data/weirauchlab/team/ngun7t/maxatac/scratch/input.npy", "rb") as f:
+        inputs = np.load(f)
+    with open("/data/weirauchlab/team/ngun7t/maxatac/scratch/target.npy", "rb") as f:
+        targets = np.load(f)
+
+    # atac-seq signal
+    atac_seq = inputs[:, :, -1]     # shape (N, 1024)
+
+    # create a pandas dataframe to feed to sns jointplot
+    num_seq, seq_len = atac_seq.shape
+    atac_seq_flat = atac_seq.flatten()
+    inds = np.tile(np.arange(seq_len), num_seq)
+    df = pd.DataFrame(data={"atac_seq_values": atac_seq_flat, "base": inds})
+
+    plt.figure()
+    sns.jointplot(data=df, x="base", y="atac_seq_values", kind="hex")
+    plt.savefig("/data/weirauchlab/team/ngun7t/maxatac/scratch/jointplot.png")

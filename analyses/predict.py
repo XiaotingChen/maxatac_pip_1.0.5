@@ -98,6 +98,8 @@ def run_prediction(args):
                                                  )  # this is a pandas Dataframe
         
         chrom_list = args.chromosomes
+        if args.debug:
+            regions_pool.to_csv(f"{output_directory}/regions_pool.csv")
     
     logging.error("Prediction Parameters \n" +
                   f"Output filename: {outfile_name_bigwig} \n" +
@@ -139,6 +141,8 @@ def run_prediction(args):
 
     # Write the predictions to a bigwig file and add name to args
     prediction_bedgraph = pd.concat(forward_strand_predictions)
+    if args.debug:
+        prediction_bedgraph.to_csv(f"{output_directory}/prediction_bedgraph.csv")
     
     write_predictions_to_bigwig(prediction_bedgraph,
                                 output_filename=outfile_name_bigwig,

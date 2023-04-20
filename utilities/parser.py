@@ -113,6 +113,9 @@ def get_parser():
     phuc_parser.add_argument("--count_peaks", nargs="+", default=[], required=False,
                             help="Count peaks and the confusion matrix for bigwig files"
                             )
+    phuc_parser.add_argument("--atac_jointplot", nargs="+", default=[], required=False,
+                            help="Create joint plot of ATAC-seq signal"
+                            )
     phuc_parser.add_argument("--loglevel",
                                 dest="loglevel",
                                 type=str,
@@ -132,6 +135,10 @@ def get_parser():
     transformer_parser.add_argument("--output_dir", type=str, default="", help="Output dir")
     transformer_parser.add_argument("--cell_type", type=str, default="", help="Cell type")
     transformer_parser.add_argument("--model_base_dir", type=str, default="", help="The directory containing the model")
+    transformer_parser.add_argument("--moods_bigwig", type=str, default="", help="The MOODS bigwig file for ism_att")
+    transformer_parser.add_argument("--npeaks", type=int, default=9, help="Number of true labels in 32bp output vector")
+    transformer_parser.add_argument("--max_num_samples", type=int, default=10, help="Number of input samples to run ism_att")
+    transformer_parser.add_argument("--dim_reduction_technique", type=str, default="pca", help="Technique for dimensionality reduction")
     transformer_parser.add_argument("--loglevel",
                                 dest="loglevel",
                                 type=str,
@@ -264,6 +271,14 @@ def get_parser():
                                 type=str,
                                 default=REFERENCE_SEQUENCE_TWOBIT,
                                 help="Genome sequence hg38.2bit file."
+                                )
+    
+    predict_parser.add_argument("--debug",
+                                dest="debug",
+                                type=bool,
+                                required=False,
+                                default=False,
+                                help="In debug mode, print out several things"
                                 )
 
     predict_parser.add_argument("--train_json",

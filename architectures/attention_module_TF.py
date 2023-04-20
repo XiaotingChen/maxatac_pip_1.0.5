@@ -48,20 +48,21 @@ class TransformerBlock(
     self.mlp_dropout2 = tf.keras.layers.Dropout(self.dropout_rate)
 
   def call(self, inputs, training=False):
-    x = self.mha_ln(inputs)
-    x, att_weights = self.mha(x, training=training)
-    x = self.mha_dropout(x, training=training)
-    x += inputs  # Residual
-    mha_output = x
+    x1 = self.mha_ln(inputs)
+    x2, att_weights = self.mha(x1, training=training)
+    x3 = self.mha_dropout(x2, training=training)
+    x3 += inputs  # Residual
+    mha_output = x3
 
     # MLP.
-    x = self.mlp_ln(mha_output)
-    x = self.mlp_linear1(x)
-    x = self.mlp_dropout1(x, training=training)
-    x = tf.nn.relu(x)
-    x = self.mlp_linear2(x)
-    x = self.mlp_dropout2(x, training=training)
-    return x + mha_output, att_weights
+    x_mlp1 = self.mlp_ln(mha_output)
+    x_mlp2 = self.mlp_linear1(x_mlp1)
+    x_mlp3 = self.mlp_dropout1(x_mlp2, training=training)
+    x_mlp3 = tf.nn.relu(x_mlp3)
+    x_mlp4 = self.mlp_linear2(x_mlp3)
+    x_mlp5 = self.mlp_dropout2(x_mlp4, training=training)
+    #return x_mlp5 + mha_output, att_weights, {"mha_ln": x1, "mha": x2, "mha_dropout": x3, "mlp_ln": x_mlp1, "mlp_linear1": x_mlp2, "mlp_dropout1": x_mlp3, "mlp_linear2": x_mlp4, "mlp_dropout2": x_mlp5}
+    return x_mlp5 + mha_output, att_weights, (x1, x2, x3, x_mlp1, x_mlp2, x_mlp3, x_mlp4, x_mlp5)
 
   def get_config(self):
     config = super().get_config()
@@ -77,6 +78,59 @@ class TransformerBlock(
   @classmethod
   def from_config(cls, config):
     return cls(**config)
+  
+# Create a Transformer layer for cross attention
+@tf.keras.utils.register_keras_serializable()
+class TransformerBlockCrossAtt(TransformerBlock):
+  def __init__(
+      self,
+      channels: int,
+      dropout_rate: float,
+      attention_kwargs: Dict[str, Any],
+      name: str = 'transformer_block_crossatt',
+      *args,
+      **kwargs):
+    super().__init__(
+      channels=channels, dropout_rate=dropout_rate, attention_kwargs=attention_kwargs, name=name,
+      *args, **kwargs
+    )
+
+  def build(self, input_shape):
+    # self.mha_ln = snt.LayerNorm(axis=-1, create_scale=True, create_offset=True)
+    self.mha_ln_kv = tf.keras.layers.LayerNormalization(axis=-1, scale=True, center=True)
+    self.mha_ln_q = tf.keras.layers.LayerNormalization(axis=-1, scale=True, center=True)
+    self.mha = MultiheadCrossAttention(**self.attention_kwargs)
+    #self.mha_dropout = snt.Dropout(dropout_rate)
+    self.mha_dropout = tf.keras.layers.Dropout(self.dropout_rate)
+
+    #self.mlp_ln = snt.LayerNorm(axis=-1, create_scale=True, create_offset=True)
+    self.mlp_ln = tf.keras.layers.LayerNormalization(axis=-1, scale=True, center=True)
+    #self.mlp_linear1 = snt.Linear(channels * 2)
+    self.mlp_linear1 = tf.keras.layers.Dense(self.channels * 2)
+    #self.mlp_dropout1 = snt.Dropout(dropout_rate)
+    self.mlp_dropout1 = tf.keras.layers.Dropout(self.dropout_rate)
+    #self.mlp_linear2 = snt.Linear(channels)
+    self.mlp_linear2 = tf.keras.layers.Dense(self.channels)
+    #self.mlp_dropout2 = snt.Dropout(dropout_rate)
+    self.mlp_dropout2 = tf.keras.layers.Dropout(self.dropout_rate)
+  
+  def call(self, key_value_inputs, query_inputs, training=False):
+    key_value = self.mha_ln_kv(key_value_inputs)
+    query = self.mha_ln_q(query_inputs)
+    x, att_weights = self.mha(key_value, query, training=training)
+    x = self.mha_dropout(x, training=training)
+    x += query  # Residual
+    mha_output = x
+
+    # MLP.
+    x = self.mlp_ln(mha_output)
+    x = self.mlp_linear1(x)
+    x = self.mlp_dropout1(x, training=training)
+    x = tf.nn.gelu(x)
+    x = self.mlp_linear2(x)
+    x = self.mlp_dropout2(x, training=training)
+    return x + mha_output, att_weights
+
 
 @tf.keras.utils.register_keras_serializable()
 class MultiheadAttention(
@@ -260,6 +314,11 @@ class MultiheadAttention(
            inputs,
            training=False
            ):
+    """
+    A note to explain what all these variables here are and how they relate to the
+    original equation in the paper:
+    https://drive.google.com/file/d/1G5qSLw6rzVCu9HvW59grILlAe7vf3Lod/view?usp=share_link
+    """
     # Initialise the projection layers.
     embedding_size = self._value_size * self._num_heads
     seq_len = tf.shape(inputs)[1]
@@ -353,6 +412,117 @@ class MultiheadAttention(
   @classmethod
   def from_config(cls, config):
     return cls(**config)
+  
+
+@tf.keras.utils.register_keras_serializable()
+class MultiheadCrossAttention(
+  MultiheadAttention
+):
+  def __init__(self,
+               value_size: int,
+               key_size: int,
+               num_heads: int,
+               scaling: bool = True,
+               attention_dropout_rate: float = 0.1,
+               relative_positions: bool = False,
+               relative_position_symmetric: bool = False,
+               relative_position_functions: Optional[List[str]] = None,
+               num_relative_position_features: Optional[int] = None,
+               positional_dropout_rate: float = 0.1,
+               zero_initialize: bool = True,
+               # initializer: Optional[snt.initializers.Initializer] = None,
+               initializer: Optional[tf.keras.initializers.Initializer] = None,
+               name: str = None,
+               *args,
+               **kwargs
+               ):
+    super().__init__(
+      value_size,
+      key_size,
+      num_heads,
+      scaling,
+      attention_dropout_rate,
+      relative_positions,
+      relative_position_symmetric,
+      relative_position_functions,
+      num_relative_position_features,
+      positional_dropout_rate,
+      zero_initialize,
+      initializer,
+      name,
+      *args,
+      **kwargs
+    )
+  def call(self, key_value_inputs, query_inputs, training=False):
+    # Initialise the projection layers.
+    embedding_size = self._value_size * self._num_heads
+    seq_len = tf.shape(key_value_inputs)[1]
+    batch_size = tf.shape(key_value_inputs)[0]
+
+    # Compute q, k and v as multi-headed projections of the inputs.
+    q = self._multihead_output(self._q_layer, query_inputs, batch_size)  # [B, H, T, K]
+    k = self._multihead_output(self._k_layer, key_value_inputs, batch_size)  # [B, H, T, K]
+    v = self._multihead_output(self._v_layer, key_value_inputs, batch_size)  # [B, H, T, V]
+
+    # Scale the query by the square-root of key size.
+    if self._scaling:
+      q *= self._key_size**-0.5
+
+    if self._relative_positions:
+      # For relative positions, we project positions to form relative keys.
+      distances = tf.range(-seq_len + 1, seq_len, dtype=tf.float32)[tf.newaxis]
+      positional_encodings = positional_features_all(
+          positions=distances,
+          feature_size=self._num_relative_position_features,
+          seq_length=seq_len,
+          feature_functions=self._relative_position_functions,
+          symmetric=self._relative_position_symmetric
+      )
+      # [1, 2T-1, Cr]
+
+      if training:
+        positional_encodings = tf.nn.dropout(
+            positional_encodings,
+            rate=self._positional_dropout_rate
+        )
+
+      # [1, H, 2T-1, K]
+      r_k = self._multihead_output(self._r_k_layer, positional_encodings, batch_size)
+
+      # Add shifted relative logits to content logits.
+      # [B, H, T', T]
+      content_logits = tf.matmul(q + self._r_w_bias, k, transpose_b=True)
+      # [B, H, T', 2T-1]
+      relative_logits = tf.matmul(
+          q + self._r_r_bias, r_k, transpose_b=True)
+      #  [B, H, T', T]
+      relative_logits = relative_shift(relative_logits)
+      logits = content_logits + relative_logits
+    else:
+      # [B, H, T', T]
+      logits = tf.matmul(q, k, transpose_b=True)
+
+    att_weights = tf.nn.softmax(logits)
+
+    # Dropout on the attention weights.
+    if training:
+      weights = tf.nn.dropout(att_weights, rate=self._attention_dropout_rate)
+    else:
+      weights = att_weights
+    # Transpose and reshape the output.
+    output = tf.matmul(weights, v)  # [B, H, T', V]
+    output_transpose = tf.transpose(output, [0, 2, 1, 3])  # [B, T', H, V]
+
+    # Final linear layer.
+    #attended_inputs = snt.reshape(output_transpose, output_shape=[embedding_size], preserve_dims=2)
+    attended_inputs = tf.reshape(
+        output_transpose,
+        (batch_size, -1, embedding_size)
+    )
+
+    output = self._embedding_layer(attended_inputs)
+
+    return output, att_weights
 
 def relative_shift(x):
   """Shift the relative logits like in TransformerXL."""
