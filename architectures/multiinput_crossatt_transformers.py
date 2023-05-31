@@ -24,12 +24,17 @@ with Mute():
     from tensorflow.keras.models import Model
     from tensorflow.keras.optimizers import Adam
 
-    from maxatac.utilities.constants import INPUT_LENGTH, \
-        OUTPUT_LENGTH, ADAM_BETA_1, ADAM_BETA_2, DEFAULT_ADAM_LEARNING_RATE, \
-        DEFAULT_ADAM_DECAY, DM_DROPOUT_RATE, \
-        CONV_TOWER_CROSSATT_CONFIGS_FUSION, DOWNSAMPLE_METHOD_CONV_TOWER_CROSSATT, USE_TOKEN, \
-        WHOLE_ATTENTION_KWARGS_SELFATT_GENOME, NUM_MHA_SELFATT, EMBEDDING_SIZE_SELFATT, \
-        WHOLE_ATTENTION_KWARGS_CROSSATT_SIGNAL, NUM_MHA_CROSSATT, EMBEDDING_SIZE_CROSSATT
+    #from maxatac.utilities.constants import INPUT_LENGTH, \
+    #    OUTPUT_LENGTH, ADAM_BETA_1, ADAM_BETA_2, DEFAULT_ADAM_LEARNING_RATE, \
+    #    DEFAULT_ADAM_DECAY, DM_DROPOUT_RATE, \
+    #    CONV_TOWER_CROSSATT_CONFIGS_FUSION, DOWNSAMPLE_METHOD_CONV_TOWER_CROSSATT, USE_TOKEN, \
+    #    WHOLE_ATTENTION_KWARGS_SELFATT_GENOME, NUM_MHA_SELFATT, EMBEDDING_SIZE_SELFATT, \
+    #    WHOLE_ATTENTION_KWARGS_CROSSATT_SIGNAL, NUM_MHA_CROSSATT, EMBEDDING_SIZE_CROSSATT
+
+    from maxatac.utilities.constants import KERNEL_INITIALIZER, INPUT_LENGTH, INPUT_CHANNELS, INPUT_FILTERS, \
+        INPUT_KERNEL_SIZE, INPUT_ACTIVATION, OUTPUT_FILTERS, OUTPUT_KERNEL_SIZE, FILTERS_SCALING_FACTOR, DILATION_RATE, \
+        OUTPUT_LENGTH, CONV_BLOCKS, PADDING, POOL_SIZE, ADAM_BETA_1, ADAM_BETA_2, DEFAULT_ADAM_LEARNING_RATE, \
+        DEFAULT_ADAM_DECAY
 
     from maxatac.architectures.dcnn import loss_function, dice_coef, get_layer
     from maxatac.architectures.attention_module_TF import TransformerBlock, TransformerBlockCrossAtt
@@ -226,16 +231,7 @@ def get_multihead_attention_custom(
 
 def get_multiinput_crossatt_transformer(
         output_activation,
-        rpe_crossatt_genome_attention_kwargs=WHOLE_ATTENTION_KWARGS_SELFATT_GENOME,
-        rpe_crossatt_signal_attention_kwargs=WHOLE_ATTENTION_KWARGS_CROSSATT_SIGNAL,
-        num_mha_crossatt=NUM_MHA_CROSSATT,
-        num_mha_selfatt=NUM_MHA_SELFATT,
-        mha_embedding_dim_crossatt=EMBEDDING_SIZE_CROSSATT,
-        mha_embedding_dim_selfatt=EMBEDDING_SIZE_SELFATT,
-        use_token=USE_TOKEN,
-        conv_tower_config_fusion=CONV_TOWER_CROSSATT_CONFIGS_FUSION,
-        dm_dropout_rate=DM_DROPOUT_RATE,
-        downsample_method_conv_tower=DOWNSAMPLE_METHOD_CONV_TOWER_CROSSATT,
+        model_config,
         adam_learning_rate=DEFAULT_ADAM_LEARNING_RATE,
         adam_decay=DEFAULT_ADAM_DECAY,
         input_length=INPUT_LENGTH,
@@ -260,33 +256,36 @@ def get_multiinput_crossatt_transformer(
     signal_layer = signal_input
 
     # Get the conv tower for each branch
-    genome_layer = get_conv_tower(genome_layer, conv_tower_config_fusion["genome"], downsample_method_conv_tower, "genome")
-    signal_layer = get_conv_tower(signal_layer, conv_tower_config_fusion["signal"], downsample_method_conv_tower, "signal")
+    genome_layer = get_conv_tower(genome_layer, model_config["CONV_TOWER_CONFIGS_FUSION"]["genome"], model_config["DOWNSAMPLE_METHOD_CONV_TOWER"], "genome")
+    signal_layer = get_conv_tower(signal_layer, model_config["CONV_TOWER_CONFIGS_FUSION"]["signal"], model_config["DOWNSAMPLE_METHOD_CONV_TOWER"], "signal")
 
     # Add the representation token
-    if use_token:
+    if model_config["USE_TOKEN"]:
         genome_layer = Token(name="Add_representation_token_genome")(genome_layer)
         signal_layer = Token(name="Add_representation_token_signal")(signal_layer)
 
     # Pass the genome branch through the self-attention
-    new_rpe_crossatt_genome_attention_kwargs = deepcopy(rpe_crossatt_genome_attention_kwargs)
-    new_rpe_crossatt_genome_attention_kwargs["initializer"] = initializers.get(rpe_crossatt_genome_attention_kwargs["initializer"])
-    for i in range(num_mha_selfatt):
+    new_rpe_crossatt_genome_attention_kwargs = deepcopy(model_config["WHOLE_ATTENTION_KWARGS_SELFATT_GENOME"])
+    new_rpe_crossatt_genome_attention_kwargs["initializer"] = initializers.get(model_config["WHOLE_ATTENTION_KWARGS_SELFATT_GENOME"]["initializer"])
+    for i in range(model_config["NUM_MHA_SELFATT"]):
         transformer_block_selfatt = TransformerBlock(
-            channels=mha_embedding_dim_selfatt,
-            dropout_rate=dm_dropout_rate,
+            channels=model_config["EMBEDDING_SIZE_SELFATT"],
+            dropout_rate=model_config["DM_DROPOUT_RATE"],
             attention_kwargs=new_rpe_crossatt_genome_attention_kwargs,
             name=f"Transformer_block_selfatt{i}"
         )
-        genome_layer, att_weights = transformer_block_selfatt(genome_layer)
+        outputs = transformer_block_selfatt(genome_layer)
+        logging.error(f"Length of transformer block output: {len(outputs)}")
+        genome_layer = outputs[0]
+        
 
     # Pass the genome branch to the atacseq branch through cross attention
-    new_rpe_crossatt_signal_attention_kwargs = deepcopy(rpe_crossatt_signal_attention_kwargs)
-    new_rpe_crossatt_signal_attention_kwargs["initializer"] = initializers.get(rpe_crossatt_signal_attention_kwargs["initializer"])
-    for i in range(num_mha_crossatt):
+    new_rpe_crossatt_signal_attention_kwargs = deepcopy(model_config["WHOLE_ATTENTION_KWARGS_CROSSATT_SIGNAL"])
+    new_rpe_crossatt_signal_attention_kwargs["initializer"] = initializers.get(model_config["WHOLE_ATTENTION_KWARGS_CROSSATT_SIGNAL"]["initializer"])
+    for i in range(model_config["NUM_MHA_CROSSATT"]):
         transformer_block_crossatt = TransformerBlockCrossAtt(
-            channels=mha_embedding_dim_crossatt,
-            dropout_rate=dm_dropout_rate,
+            channels=model_config["EMBEDDING_SIZE_CROSSATT"],
+            dropout_rate=model_config["DM_DROPOUT_RATE"],
             attention_kwargs=new_rpe_crossatt_signal_attention_kwargs,
             name=f"Transformer_block_crossatt{i}"
         )

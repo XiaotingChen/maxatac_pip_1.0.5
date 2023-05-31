@@ -2,6 +2,7 @@
 import tensorflow as tf
 import numpy as np
 import os
+import json
 import ntpath
 from shap import DeepExplainer, GradientExplainer
 from sklearn.decomposition import PCA
@@ -14,7 +15,6 @@ from scipy.stats import zscore
 from maxatac.utilities.transformer_interpret_tools import dinuc_shuffle, get_data, load_model_from_dir, \
     get_ism_data, input_for_interfusion_att, input_for_interfusion_ism, run_ism, input_maximization_atac_interfusion, \
     run_shap_genome, run_shap_atac, get_intermediate_layer_names, visualize_latent_vectors
-from maxatac.utilities.constants import INTER_FUSION
 from maxatac.utilities.plot import plot_ism_results
 
 def run_transformer_interpret(args):
@@ -26,48 +26,52 @@ def run_transformer_interpret(args):
     
     if args.analysis == "shap":
         attribution_shap_genome(
-            args.meta_file, args.chromosome, args.cell_type, args.output_dir, args.model_base_dir
+            args.meta_file, args.model_config, args.chromosome, args.cell_type, args.output_dir, args.model_base_dir
         )
 
     if args.analysis == "latent_viz":
         conv_tower_output(
-            args.meta_file, args.chromosome, args.cell_type, args.output_dir, args.model_base_dir,
+            args.meta_file, args.model_config, args.chromosome, args.cell_type, args.output_dir, args.model_base_dir,
             technique=args.dim_reduction_technique
         )
 
     if args.analysis == "check_offset":
         check_attention_offset_distribution(
-            args.meta_file, args.chromosome, args.cell_type, args.output_dir, args.model_base_dir
+            args.meta_file, args.model_config, args.chromosome, args.cell_type, args.output_dir, args.model_base_dir
         )
 
     if args.analysis == "ISM":
         ISM(
-            args.meta_file, args.chromosome, args.cell_type, args.output_dir, args.model_base_dir
+            args.meta_file, args.model_config, args.chromosome, args.cell_type, args.output_dir, args.model_base_dir
         )
 
     if args.analysis == "check_trans_contrib":
         check_layer_contributions(
-            args.meta_file, args.chromosome, args.cell_type, args.output_dir, args.model_base_dir
+            args.meta_file, args.model_config, args.chromosome, args.cell_type, args.output_dir, args.model_base_dir
         )
 
     if args.analysis == "attention_weights_viz":
         plot_attention_weights(
-            args.meta_file, args.chromosome, args.cell_type, args.output_dir, args.model_base_dir
+            args.meta_file, args.model_config, args.chromosome, args.cell_type, args.output_dir, args.model_base_dir
         )
 
     if args.analysis == "ism_att":
         ism_attention_weights_correlation(
-            args.meta_file, args.chromosome, args.cell_type, args.output_dir, args.model_base_dir, args.moods_bigwig, 
+            args.meta_file, args.model_config, args.chromosome, args.cell_type, args.output_dir, args.model_base_dir, args.moods_bigwig, 
             npeaks=args.npeaks, max_num_samples=args.max_num_samples
         )
 
 
-def attribution_shap_genome(meta_file, chromosome, cell_type, output_dir, model_base_dir, bases_of_interest_list, input_seq=None, num_background_seqs=100):
+def attribution_shap_genome(meta_file, model_config, chromosome, cell_type, output_dir, model_base_dir, bases_of_interest_list, input_seq=None, num_background_seqs=100):
     """
     Implement Integrated Gradients for the model, providing the background for only the genome
     """
     #tf.compat.v1.disable_v2_behavior()
     #inputs, targets = get_data(meta_file, chromosome, cell_type, output_dir)     # numpy array shape (batch, 1024, 5) (let's set batch = 1)
+
+    # Read model config
+    with open(model_config, "r") as f:
+        model_config = json.load(f)
     
     with open("/data/weirauchlab/team/ngun7t/maxatac/scratch/input.npy", "rb") as f:
         inputs = np.load(f)
@@ -75,12 +79,12 @@ def attribution_shap_genome(meta_file, chromosome, cell_type, output_dir, model_
         targets = np.load(f)
 
     # Load model from dir
-    model = load_model_from_dir(model_base_dir)
+    model = load_model_from_dir(model_base_dir, model_config)
 
     if input_seq is not None:
 
-        input_samples = input_for_interfusion_att(input_seq, INTER_FUSION)   # This is a list
-        if INTER_FUSION:
+        input_samples = input_for_interfusion_att(input_seq, model_config["INTER_FUSION"])   # This is a list
+        if model_config["INTER_FUSION"]:
             contribs_all_samples = []
 
             for i, input_sample in enumerate(input_samples):
@@ -89,7 +93,7 @@ def attribution_shap_genome(meta_file, chromosome, cell_type, output_dir, model_
                 bases_of_interest = bases_of_interest_list[i]
                 for base_of_interest in bases_of_interest:     # example: base_of_interest = [[13], [14], [15]]
                     logging.error(base_of_interest)
-                    contrib = run_shap_genome([genome, signal], model, base_of_interest, num_background_seqs, INTER_FUSION)
+                    contrib = run_shap_genome([genome, signal], model, base_of_interest, num_background_seqs, model_config["INTER_FUSION"])
                     if type(contrib) == list:
                         contribs.append(contrib[0])
 
@@ -99,17 +103,21 @@ def attribution_shap_genome(meta_file, chromosome, cell_type, output_dir, model_
             return contribs_all_samples
         
 
-def attribution_shap_atac(meta_file, chromosome, cell_type, output_dir, model_base_dir, bases_of_interest_list, input_seq=None, num_background_seqs=100):
+def attribution_shap_atac(meta_file, model_config, chromosome, cell_type, output_dir, model_base_dir, bases_of_interest_list, input_seq=None, num_background_seqs=100):
     """
     Implement Integrated Gradients for the model, providing the background for only the ATAC
     """
+    # Read model config
+    with open(model_config, "r") as f:
+        model_config = json.load(f)
+
     # Load model from dir
-    model = load_model_from_dir(model_base_dir)
+    model = load_model_from_dir(model_base_dir, model_config)
 
     if input_seq is not None:
 
-        input_samples = input_for_interfusion_att(input_seq, INTER_FUSION)   # This is a list
-        if INTER_FUSION:
+        input_samples = input_for_interfusion_att(input_seq, model_config["INTER_FUSION"])   # This is a list
+        if model_config["INTER_FUSION"]:
             contribs_all_samples = []
 
             for i, input_sample in enumerate(input_samples):
@@ -118,7 +126,7 @@ def attribution_shap_atac(meta_file, chromosome, cell_type, output_dir, model_ba
                 bases_of_interest = bases_of_interest_list[i]
                 for base_of_interest in bases_of_interest:     # example: base_of_interest = [[13], [14], [15]]
                     logging.error(base_of_interest)
-                    contrib = run_shap_atac([genome, signal], model, base_of_interest, num_background_seqs, INTER_FUSION)
+                    contrib = run_shap_atac([genome, signal], model, base_of_interest, num_background_seqs, model_config["INTER_FUSION"])
                     if type(contrib) == list:
                         contribs.append(contrib[1])
 
@@ -127,7 +135,7 @@ def attribution_shap_atac(meta_file, chromosome, cell_type, output_dir, model_ba
                 contribs_all_samples.append(contribs)   
             return contribs_all_samples
 
-def ISM(meta_file, chromosome, cell_type, output_dir, model_base_dir, bases_of_interest_list, input_seq=None, npeaks=9, max_num_samples=15, visualize=True):
+def ISM(meta_file, model_config, chromosome, cell_type, output_dir, model_base_dir, bases_of_interest_list, input_seq=None, npeaks=9, max_num_samples=15, visualize=True):
     """
     ISM stands for In-Silico Mutagenesis
     """
@@ -139,13 +147,17 @@ def ISM(meta_file, chromosome, cell_type, output_dir, model_base_dir, bases_of_i
     with open("/data/weirauchlab/team/ngun7t/maxatac/scratch/target.npy", "rb") as f:
         targets = np.load(f)
 
+    # Read model config
+    with open(model_config, "r") as f:
+        model_config = json.load(f)
+
     batch_size = 128
     output_size = 32
     seq_len = 1024
     differences = []
 
     # Load model from dir
-    model = load_model_from_dir(model_base_dir)
+    model = load_model_from_dir(model_base_dir, model_config)
 
     if input_seq is None:
         # Extract genome sequence and ATAC seq
@@ -154,7 +166,7 @@ def ISM(meta_file, chromosome, cell_type, output_dir, model_base_dir, bases_of_i
 
         for j in range(min(max_num_samples, relevant_inputs.shape[0])):
             orig_seq = relevant_inputs[j:j+1, :, :]                # shape (1, 1024, 5)
-            difference = run_ism(orig_seq, model, batch_size, output_size, seq_len, INTER_FUSION)
+            difference = run_ism(orig_seq, model, batch_size, output_size, seq_len, model_config["INTER_FUSION"])
             differences.append(difference) 
             if visualize:
                 output_full_dir = output_dir
@@ -167,7 +179,7 @@ def ISM(meta_file, chromosome, cell_type, output_dir, model_base_dir, bases_of_i
         for j in range(min(num_input_seqs, max_num_samples)):
             bases_of_interest = bases_of_interest_list[j]
             orig_seq = input_seq[j:j+1, :, :]                # shape (1, 1024, 5)
-            difference = run_ism(orig_seq, model, bases_of_interest, batch_size, output_size, seq_len, INTER_FUSION) # this is a list
+            difference = run_ism(orig_seq, model, bases_of_interest, batch_size, output_size, seq_len, model_config["INTER_FUSION"]) # this is a list
             differences.append(difference)
             if visualize:
                 output_full_dir = output_dir
@@ -179,13 +191,17 @@ def ISM(meta_file, chromosome, cell_type, output_dir, model_base_dir, bases_of_i
     return differences
 
 
-def conv_tower_output(meta_file, chromosome, cell_type, output_dir, model_base_dir, max_num_seqs=15, technique="pca"):
+def conv_tower_output(meta_file, model_config, chromosome, cell_type, output_dir, model_base_dir, max_num_seqs=15, technique="pca"):
     """
     Get the output of the last conv tower layer to see how well this vector representation has already achieved in the classification
     Some methods include PCA - tSNE - UMAP of these representations
     Or building probing classifiers (https://arxiv.org/pdf/2102.12452.pdf)
     """
-    model = load_model_from_dir(model_base_dir)
+    # Read model config
+    with open(model_config, "r") as f:
+        model_config = json.load(f)
+
+    model = load_model_from_dir(model_base_dir, model_config)
 
     # Get the output of the all the relevant layers (with the name downsampling_conv) and create a sub model
     layer_names = [layer.name for layer in model.layers if "downsampling_conv" in layer.name or "Transformer_block" in layer.name]
@@ -277,12 +293,16 @@ def conv_tower_output(meta_file, chromosome, cell_type, output_dir, model_base_d
     plt.savefig(f"/data/weirauchlab/team/ngun7t/maxatac/scratch/{technique}_layers.png")
 
 
-def check_attention_offset_distribution(meta_file, chromosome, cell_type, output_dir, model_base_dir):
+def check_attention_offset_distribution(meta_file, model_config, chromosome, cell_type, output_dir, model_base_dir):
     """
     Concept: visualize the distribution of the attention weights further away from the base of interest
     """
     batch_size = 100
-    model = load_model_from_dir(model_base_dir)
+    # Read model config
+    with open(model_config, "r") as f:
+        model_config = json.load(f)
+
+    model = load_model_from_dir(model_base_dir, model_config)
 
     # Get the output of the all the relevant layers (with the name downsampling_conv) and create a sub model
     layer_names = [layer.name for layer in model.layers if "Transformer_block" in layer.name]
@@ -335,7 +355,7 @@ def check_attention_offset_distribution(meta_file, chromosome, cell_type, output
     plt.savefig(f"/data/weirauchlab/team/ngun7t/maxatac/scratch/attention_bases.png")
 
 
-def check_layer_contributions(meta_file, chromosome, cell_type, output_dir, model_base_dir, max_num_seqs=15, npeaks=9, mode="b"):
+def check_layer_contributions(meta_file, model_config, chromosome, cell_type, output_dir, model_base_dir, max_num_seqs=15, npeaks=9, mode="b"):
     """
     Check whether each transformer layer plays an important role in the predictions
     To do it, extract the conv layer after the final transformer layer,
@@ -349,7 +369,11 @@ def check_layer_contributions(meta_file, chromosome, cell_type, output_dir, mode
 
     There's a lot of hard-coded things in this function
     """
-    model = load_model_from_dir(model_base_dir)
+    # Read model config
+    with open(model_config, "r") as f:
+        model_config = json.load(f)
+
+    model = load_model_from_dir(model_base_dir, model_config)
 
     # Get the output of the all the transformer layers and the last downsampling_conv and create a sub model
     relevant_layers = [layer.name for layer in model.layers if "Transformer_block" in layer.name]
@@ -429,7 +453,7 @@ def check_layer_contributions(meta_file, chromosome, cell_type, output_dir, mode
         
 
 def plot_attention_weights(
-        meta_file, chromosome, cell_type, output_dir, model_base_dir, max_num_samples=10, npeaks=9,
+        meta_file, model_config, chromosome, cell_type, output_dir, model_base_dir, max_num_samples=10, npeaks=9,
         input_seq=None, num_heads=4, aggregation_func="mean", z_score=True, visualize=True
     ):
     """
@@ -440,7 +464,10 @@ def plot_attention_weights(
     Aggregation function can be mean or max
     z-score att weights??
     """
-    model = load_model_from_dir(model_base_dir)
+    # Read model config
+    with open(model_config, "r") as f:
+        model_config = json.load(f)
+    model = load_model_from_dir(model_base_dir, model_config)
     if aggregation_func == "mean":
         func = np.mean
     elif aggregation_func == "max":
@@ -449,7 +476,7 @@ def plot_attention_weights(
     if input_seq is not None:
         input_seq = input_seq[:max_num_samples, :, :]
         logging.error(input_seq.shape)
-        input_sample = input_for_interfusion_att(input_seq, INTER_FUSION)
+        input_sample = input_for_interfusion_att(input_seq, model_config["INTER_FUSION"])
     else:
         # For debugging, load the data instead
         #inputs, targets = get_data(meta_file, chromosome, cell_type, output_dir)
@@ -457,7 +484,7 @@ def plot_attention_weights(
             inputs = np.load(f)
         with open("/data/weirauchlab/team/ngun7t/maxatac/scratch/target.npy", "rb") as f:
             targets = np.load(f)
-        input_sample = input_for_interfusion_att(inputs[:max_num_samples, :, :], INTER_FUSION)
+        input_sample = input_for_interfusion_att(inputs[:max_num_samples, :, :], model_config["INTER_FUSION"])
 
 
     relevant_layers = [layer.name for layer in model.layers if "Transformer_block" in layer.name]
@@ -530,22 +557,26 @@ def plot_attention_weights(
     return att_matrices
 
 
-def plot_latent_signal_vector(meta_file, chromosome, cell_type, output_dir, model_base_dir, input_seq=None, visualize=False, max_num_samples=15, npeaks=9):
+def plot_latent_signal_vector(meta_file, model_config, chromosome, cell_type, output_dir, model_base_dir, input_seq=None, visualize=False, max_num_samples=15, npeaks=9):
     """
     Plot the latent ATAC-seq signal at multiple layers to MHA
         - At the last layer of the conv tower
         - At the last layer before feeding to the transformer
         - At the layer after layer norm inside MHA
     """
-    model = load_model_from_dir(model_base_dir)
+    # Read model config
+    with open(model_config, "r") as f:
+        model_config = json.load(f)
+
+    model = load_model_from_dir(model_base_dir, model_config)
 
     # Get the name of all relevant layers
-    all_layer_names = get_intermediate_layer_names(model_base_dir, branch="atac")
+    all_layer_names = get_intermediate_layer_names(model_base_dir, model_config, branch="atac")
 
     if input_seq is not None:
         input_seq = input_seq[:max_num_samples, :, :]
         logging.error(input_seq.shape)
-        input_sample = input_for_interfusion_ism(input_seq, INTER_FUSION)
+        input_sample = input_for_interfusion_ism(input_seq, model_config["INTER_FUSION"])
         latent_vectors = []
 
         layers_before_transformer = [l for l in all_layer_names if "Transformer_block" not in l]
@@ -581,22 +612,26 @@ def plot_latent_signal_vector(meta_file, chromosome, cell_type, output_dir, mode
         return latent_vectors, all_layer_names
     
 
-def plot_latent_genome_vector(meta_file, chromosome, cell_type, output_dir, model_base_dir, input_seq=None, visualize=False, max_num_samples=15, npeaks=9):
+def plot_latent_genome_vector(meta_file, model_config, chromosome, cell_type, output_dir, model_base_dir, input_seq=None, visualize=False, max_num_samples=15, npeaks=9):
     """
     Plot the latent ATAC-seq signal at multiple layers to MHA
         - At the last layer of the conv tower
         - At the last layer before feeding to the transformer
         - At the layer after layer norm inside MHA
     """
-    model = load_model_from_dir(model_base_dir)
+    # Read model config
+    with open(model_config, "r") as f:
+        model_config = json.load(f)
+
+    model = load_model_from_dir(model_base_dir, model_config)
 
     # Get the name of all relevant layers
-    all_layer_names = get_intermediate_layer_names(model_base_dir, branch="genome")
+    all_layer_names = get_intermediate_layer_names(model_base_dir, model_config, branch="genome")
 
     if input_seq is not None:
         input_seq = input_seq[:max_num_samples, :, :]
         logging.error(input_seq.shape)
-        input_sample = input_for_interfusion_ism(input_seq, INTER_FUSION)
+        input_sample = input_for_interfusion_ism(input_seq, model_config["INTER_FUSION"])
         latent_vectors = []
 
         # Conv layers
@@ -634,7 +669,8 @@ def plot_latent_genome_vector(meta_file, chromosome, cell_type, output_dir, mode
 
 
 def ism_attention_weights_correlation(
-        meta_file, 
+        meta_file,
+        model_config, 
         chromosome, 
         cell_type, 
         output_dir, 
@@ -649,6 +685,10 @@ def ism_attention_weights_correlation(
         - Plot the attention rows similar to the supp figure of Enformer paper
         - 
     """
+    # Read model config
+    with open(model_config, "r") as f:
+        model_config_dict = json.load(f)
+
     # Plot attention row
     def plot_att_row(att_row, ax):
         """
@@ -697,11 +737,6 @@ def ism_attention_weights_correlation(
     with open(f"{'/'.join(output_dir.split('/')[:-1])}/moods.npy", "wb") as f:
         np.save(f, moods)
 
-    #with open("/data/weirauchlab/team/ngun7t/maxatac/scratch/input.npy", "rb") as f:
-    #    inputs = np.load(f)
-    #with open("/data/weirauchlab/team/ngun7t/maxatac/scratch/target.npy", "rb") as f:
-    #    targets = np.load(f)
-
     # Choose inputs that have high target peaks
     target_peaks = np.sum(targets, axis=1)
     relevant_inputs = inputs[target_peaks == npeaks]
@@ -724,25 +759,25 @@ def ism_attention_weights_correlation(
         bases_of_interest_list.append(bases_of_interest)
 
     # Then run ATAC-seq latent vector, atac_latent_vectors.shape = (num_samples, num_types_of_layer, seq_len, feature_dims)
-    atac_latent_vectors, all_layer_names = plot_latent_signal_vector(meta_file, chromosome, cell_type, output_dir, model_base_dir, input_seq=input_seq, max_num_samples=max_num_samples, npeaks=npeaks, visualize=visualize)
+    atac_latent_vectors, all_layer_names = plot_latent_signal_vector(meta_file, model_config, chromosome, cell_type, output_dir, model_base_dir, input_seq=input_seq, max_num_samples=max_num_samples, npeaks=npeaks, visualize=visualize)
 
     # Then run genome latent vector, genome_latent_vectors.shape = (num_samples, num_types_of_layer, seq_len, feature_dims)
-    genome_latent_vectors, all_layer_names = plot_latent_genome_vector(meta_file, chromosome, cell_type, output_dir, model_base_dir, input_seq=input_seq, max_num_samples=max_num_samples, npeaks=npeaks, visualize=visualize)
+    genome_latent_vectors, all_layer_names = plot_latent_genome_vector(meta_file, model_config, chromosome, cell_type, output_dir, model_base_dir, input_seq=input_seq, max_num_samples=max_num_samples, npeaks=npeaks, visualize=visualize)
 
     # Then run attribution SHAP for ATAC only
     # This is a list of list, the outer list contains the results for each sample, the inner list contains results for different outputs
-    shap_atac_results = attribution_shap_atac(meta_file, chromosome, cell_type, output_dir, model_base_dir, bases_of_interest_list, input_seq=input_seq, num_background_seqs=num_bg_shap)
+    shap_atac_results = attribution_shap_atac(meta_file, model_config, chromosome, cell_type, output_dir, model_base_dir, bases_of_interest_list, input_seq=input_seq, num_background_seqs=num_bg_shap)
 
     # Then run attribution SHAP
     # This is a list of list, the outer list contains the results for each sample, the inner list contains results for different outputs
-    shap_genome_results = attribution_shap_genome(meta_file, chromosome, cell_type, output_dir, model_base_dir, bases_of_interest_list, input_seq=input_seq, num_background_seqs=num_bg_shap)
+    shap_genome_results = attribution_shap_genome(meta_file, model_config, chromosome, cell_type, output_dir, model_base_dir, bases_of_interest_list, input_seq=input_seq, num_background_seqs=num_bg_shap)
 
     # First run ISM and get the output vector
     # This is a list of list
-    ism_results = ISM(meta_file, chromosome, cell_type, output_dir, model_base_dir, bases_of_interest_list, input_seq=input_seq, max_num_samples=max_num_samples, visualize=visualize, npeaks=npeaks)
+    ism_results = ISM(meta_file, model_config, chromosome, cell_type, output_dir, model_base_dir, bases_of_interest_list, input_seq=input_seq, max_num_samples=max_num_samples, visualize=visualize, npeaks=npeaks)
 
     # Then run attention weights
-    att_matrices = plot_attention_weights(meta_file, chromosome, cell_type, output_dir, model_base_dir, input_seq=input_seq, visualize=visualize, z_score=False,
+    att_matrices = plot_attention_weights(meta_file, model_config, chromosome, cell_type, output_dir, model_base_dir, input_seq=input_seq, visualize=visualize, z_score=False,
                                         aggregation_func=agg_func, max_num_samples=max_num_samples, npeaks=npeaks)        # shape = (num_layer, num_head, height, width)
     
     # Then resize the output match with the dimension of the attention weights
@@ -774,7 +809,7 @@ def ism_attention_weights_correlation(
 
         # Visualize the attention row at the highest base
         # When doing interfusion, there are two rows that correspond to the original base (genome branch and ATAC branch)
-        if INTER_FUSION:
+        if model_config_dict["INTER_FUSION"]:
 
             fig, axes = plt.subplots(nrows=22, ncols=1, figsize=(17, 30), sharex=True, constrained_layout=True)
             first_row_ind = ism_highest_val_base

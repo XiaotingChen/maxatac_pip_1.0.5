@@ -20,7 +20,7 @@ from maxatac.architectures.transformers import get_transformer
 from maxatac.architectures.multiinput_transformers import get_multiinput_transformer
 from maxatac.architectures.multiinput_crossatt_transformers import get_multiinput_crossatt_transformer
 from maxatac.utilities.constants import BP_RESOLUTION, BATCH_SIZE, CHR_POOL_SIZE, INPUT_LENGTH, INPUT_CHANNELS, \
-    BP_ORDER, TRAIN_SCALE_SIGNAL, BLACKLISTED_REGIONS, DEFAULT_CHROM_SIZES
+    BP_ORDER, TRAIN_SCALE_SIGNAL, BLACKLISTED_REGIONS, DEFAULT_CHROM_SIZES, INTER_FUSION
 from maxatac.utilities.genome_tools import load_bigwig, load_2bit, get_one_hot_encoded, build_chrom_sizes_dict
 from maxatac.utilities.system_tools import get_dir, remove_tags, replace_extension
 
@@ -38,7 +38,6 @@ class MaxATACModel(object):
 
     def __init__(self,
                  arch,
-                 model_config,
                  seed,
                  output_directory,
                  prefix,
@@ -49,8 +48,7 @@ class MaxATACModel(object):
                  target_scale_factor=TRAIN_SCALE_SIGNAL,
                  output_activation="sigmoid",
                  interpret=False,
-                 interpret_cell_type="",
-                 inter_fusion=False
+                 interpret_cell_type=""
                  ):
         """
         Initialize the maxATAC model with the input parameters and architecture
@@ -67,7 +65,6 @@ class MaxATACModel(object):
         :param interpret: Boolean for whether this is training or interpretation
         """
         self.arch = arch
-        self.model_config = model_config
         self.seed = seed
         self.output_directory = get_dir(output_directory)
         self.model_filename = prefix + "_{epoch}" + ".h5"
@@ -81,7 +78,6 @@ class MaxATACModel(object):
         self.dense = dense
         self.weights = weights
         self.target_scale_factor = target_scale_factor
-        self.inter_fusion = inter_fusion
 
         # Set the random seed for the model
         random.seed(seed)
@@ -125,28 +121,25 @@ class MaxATACModel(object):
                 weights=self.weights
             )
         elif self.arch == "Transformer_phuc":
-            if (self.inter_fusion):
+            if (INTER_FUSION):
                 return get_multiinput_transformer(
                     output_activation=self.output_activation,
                     target_scale_factor=self.target_scale_factor,
                     dense_b=self.dense,
-                    weights=self.weights,
-                    model_config=self.model_config
+                    weights=self.weights
                 )
             else:
                 return get_transformer(
                     output_activation=self.output_activation,
                     target_scale_factor=self.target_scale_factor,
                     dense_b=self.dense,
-                    weights=self.weights,
-                    model_config=self.model_config
+                    weights=self.weights
                 )
         elif self.arch == "Crossatt_transformer":
-            assert self.inter_fusion, "This architecture only works with split inputs!"
+            assert INTER_FUSION, "This architecture only works with split inputs!"
             return get_multiinput_crossatt_transformer(
                     output_activation=self.output_activation,
-                    weights=self.weights,
-                    model_config=self.model_config
+                    weights=self.weights
                 )
         else:
             sys.exit("Model Architecture not specified correctly. Please check")
@@ -163,8 +156,8 @@ def DataGenerator(
         target_scale_factor=1,
         batch_size=BATCH_SIZE,
         shuffle_cell_type=False,
-        rev_comp_train=False,
-        inter_fusion=False
+        rev_comp_train=False
+
 ):
     """
     Initiate a data generator that will yield a batch of examples for training. This generator will mix samples from a
@@ -248,7 +241,7 @@ def DataGenerator(
             inputs_batch = roi_input_batch
             targets_batch = roi_target_batch
 
-        if not inter_fusion:
+        if not INTER_FUSION:
             yield inputs_batch, targets_batch  # change to yield
         else:
             # Split the inputs_batch to the genome track and the atacseq track
@@ -600,7 +593,8 @@ class ROIPool(object):
                  prefix,
                  output_directory,
                  shuffle,
-                 tag
+                 tag,
+                 use_chip_roi
                  ):
         """
         :param chroms: Chromosomes to limit the analysis to
@@ -629,7 +623,8 @@ class ROIPool(object):
                                      chromosomes=self.chroms,
                                      chromosome_sizes_dictionary=build_chrom_sizes_dict(self.chroms,
                                                                                         DEFAULT_CHROM_SIZES),
-                                     blacklist=BLACKLISTED_REGIONS)
+                                     blacklist=BLACKLISTED_REGIONS,
+                                     use_chip_roi=use_chip_roi)
 
             regions.write_data(self.prefix,
                                output_dir=self.output_directory,
@@ -710,7 +705,8 @@ class GenomicRegions(object):
                  chromosomes,
                  chromosome_sizes_dictionary,
                  blacklist,
-                 region_length
+                 region_length,
+                 use_chip_roi
                  ):
         """
         When the object is initialized it will import all of the peaks in the meta files and parse them into training
@@ -728,6 +724,7 @@ class GenomicRegions(object):
         self.chromosomes = chromosomes
         self.blacklist = blacklist
         self.region_length = region_length
+        self.use_chip_roi = use_chip_roi
 
         # Import meta txt as dataframe
         self.meta_dataframe = pd.read_csv(self.meta_path, sep='\t', header=0, index_col=None)
@@ -742,13 +739,18 @@ class GenomicRegions(object):
                                          index=self.meta_dataframe.Cell_Line).to_dict()
 
         # You must generate the ROI pool before you can get the final shape
-        self.atac_roi_pool = self.__get_roi_pool(self.atac_dictionary, "ATAC", )
-        self.chip_roi_pool = self.__get_roi_pool(self.chip_dictionary, "CHIP")
+        if self.use_chip_roi:
+            self.atac_roi_pool = self.__get_roi_pool(self.atac_dictionary, "ATAC")
+            self.chip_roi_pool = self.__get_roi_pool(self.chip_dictionary, "CHIP")
 
-        self.combined_pool = pd.concat([self.atac_roi_pool, self.chip_roi_pool])
+            self.combined_pool = pd.concat([self.atac_roi_pool, self.chip_roi_pool])
 
-        self.atac_roi_size = self.atac_roi_pool.shape[0]
-        self.chip_roi_size = self.chip_roi_pool.shape[0]
+            self.atac_roi_size = self.atac_roi_pool.shape[0]
+            self.chip_roi_size = self.chip_roi_pool.shape[0]
+        else:
+            self.atac_roi_pool = self.__get_roi_pool(self.atac_dictionary, "ATAC")
+            self.combined_pool = self.atac_roi_pool
+            self.atac_roi_size = self.atac_roi_pool.shape[0]
 
     def __get_roi_pool(self, dictionary, roi_type_tag):
         """
@@ -904,9 +906,3 @@ def save_metadata(output_dir, args):
     args_dict.pop("func", None)
     with open(os.path.join(output_dir, "cmd_args.json"), "w+") as f:
         json.dump(args_dict, f, sort_keys=True, indent=3)
-
-
-def get_initializer(initializer_name):
-    """
-    A helper function to get the 
-    """

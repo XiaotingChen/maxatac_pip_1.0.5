@@ -195,7 +195,7 @@ def background_atac_for_IG(genome_seq, ATAC_signal, num_samples, interfusion,
     if interfusion: return [genome_background, atac_background]
 
 
-def load_model_from_dir(model_base_dir):
+def load_model_from_dir(model_base_dir, model_config):
     """
     Load the model from dir
     """
@@ -207,6 +207,7 @@ def load_model_from_dir(model_base_dir):
 
     model = MaxATACModel(
         arch=train_args["arch"],
+        model_config=model_config,
         seed=train_args["seed"],
         output_directory=train_args["output"],
         prefix=train_args["prefix"],
@@ -334,7 +335,7 @@ def get_ism_data(orig_seq):
     return ism_data
 
 
-def get_intermediate_layer_names(model_base_dir, branch):
+def get_intermediate_layer_names(model_base_dir, model_config, branch):
     """
     Based on the name of the model, return the associated layer names
     Two model types are currently supported:
@@ -342,7 +343,7 @@ def get_intermediate_layer_names(model_base_dir, branch):
         - multiinput_<tf>_512_enformerconv
     """
     model_name = ntpath.basename(model_base_dir)
-    model = load_model_from_dir(model_base_dir)
+    model = load_model_from_dir(model_base_dir, model_config)
 
     if "multiinput_" in model_name and "_512_new" in model_name:
         if branch == "atac":

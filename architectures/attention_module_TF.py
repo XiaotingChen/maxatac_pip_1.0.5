@@ -63,6 +63,7 @@ class TransformerBlock(
     x_mlp5 = self.mlp_dropout2(x_mlp4, training=training)
     #return x_mlp5 + mha_output, att_weights, {"mha_ln": x1, "mha": x2, "mha_dropout": x3, "mlp_ln": x_mlp1, "mlp_linear1": x_mlp2, "mlp_dropout1": x_mlp3, "mlp_linear2": x_mlp4, "mlp_dropout2": x_mlp5}
     return x_mlp5 + mha_output, att_weights, (x1, x2, x3, x_mlp1, x_mlp2, x_mlp3, x_mlp4, x_mlp5)
+    #return x_mlp5 + mha_output
 
   def get_config(self):
     config = super().get_config()

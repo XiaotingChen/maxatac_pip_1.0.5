@@ -68,6 +68,10 @@ def run_prediction(args):
     with open(args.train_json, "r") as f:
         train_args = json.load(f)
 
+    # Open the model_config JSON file
+    with open(args.model_config, "r") as f:
+        model_config = json.load(f)
+
     # Output filename for the bigwig predictions file based on the output directory and the prefix. Add the bw extension
     outfile_name_bigwig = os.path.join(output_directory, args.prefix + ".bw")
 
@@ -128,14 +132,17 @@ def run_prediction(args):
     else:
         forward_strand_predictions = []
         for chromosome in chrom_list:
-            forward_strand_predictions.append(make_stranded_predictions(regions_pool,
+            forward_strand_predictions.append(make_stranded_predictions(
+                                                                    model_config,
+                                                                    regions_pool,
                                                                     args.signal,
                                                                     args.sequence,
                                                                     args.model,
                                                                     args.batch_size,
                                                                     False,
                                                                     chromosome,
-                                                                    train_args=train_args))
+                                                                    train_args=train_args,
+                                                                    inter_fusion=model_config["INTER_FUSION"]))
 
     logging.error("Write predictions to a bigwig file")
 

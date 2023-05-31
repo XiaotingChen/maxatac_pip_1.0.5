@@ -5,7 +5,7 @@ import pandas as pd
 import pybedtools
 import tensorflow as tf
 
-from maxatac.utilities.constants import INPUT_CHANNELS, INPUT_LENGTH, ALL_CHRS, INTER_FUSION
+from maxatac.utilities.constants import INPUT_CHANNELS, INPUT_LENGTH, ALL_CHRS
 from maxatac.utilities.system_tools import Mute
 
 with Mute():
@@ -198,7 +198,8 @@ class PredictionDataGenerator(tf.keras.utils.Sequence):
                  input_channels: int = INPUT_CHANNELS,
                  input_length: int = INPUT_LENGTH,
                  batch_size=32,
-                 use_complement=False
+                 use_complement=False,
+                 inter_fusion=False
                  ):
         """
         Initialize the training generator. This is a keras sequence class object. It is used
@@ -220,6 +221,7 @@ class PredictionDataGenerator(tf.keras.utils.Sequence):
         self.input_channels = input_channels
         self.input_length = input_length
         self.use_complement = use_complement
+        self.inter_fusion = inter_fusion
 
         self.predict_roi_df.reset_index(inplace=True, drop=True)
 
@@ -247,7 +249,7 @@ class PredictionDataGenerator(tf.keras.utils.Sequence):
         # Generate data (X has shape (batch, seq_len, dim))
         X = self.__data_generation__(batch_indexes)
 
-        if not INTER_FUSION:
+        if not self.inter_fusion:
             return X
         else:
             genome = X[...,:4]
@@ -302,7 +304,8 @@ class PredictionDataGenerator(tf.keras.utils.Sequence):
         return np.array(inputs_batch)
 
 
-def make_stranded_predictions(roi_pool: pd.DataFrame,
+def make_stranded_predictions(model_config: dict,
+                              roi_pool: pd.DataFrame,
                               signal: str,
                               sequence: str,
                               model: str,
@@ -310,6 +313,7 @@ def make_stranded_predictions(roi_pool: pd.DataFrame,
                               use_complement: bool,
                               chromosome: str,
                               train_args: dict,
+                              inter_fusion: bool =False,
                               number_intervals: int =32,
                               input_channels: int =INPUT_CHANNELS,
                               input_length: int =INPUT_LENGTH):
@@ -325,13 +329,15 @@ def make_stranded_predictions(roi_pool: pd.DataFrame,
     except:
         maxatac_model = MaxATACModel(arch=train_args["arch"],
                                     seed=train_args["seed"],
+                                    model_config=model_config,
                                     output_directory=train_args["output"],
                                     prefix=train_args["prefix"],
                                     threads=train_args["threads"],
                                     meta_path=train_args["meta_file"],
                                     output_activation=train_args["output_activation"],
                                     dense=train_args["dense"],
-                                    weights=model
+                                    weights=model,
+                                    inter_fusion=inter_fusion
                                     )
         nn_model = maxatac_model.nn_model
 
@@ -347,7 +353,8 @@ def make_stranded_predictions(roi_pool: pd.DataFrame,
                                              input_length=input_length,
                                              predict_roi_df=chr_roi_pool,
                                              batch_size=batch_size,
-                                             use_complement=use_complement)
+                                             use_complement=use_complement,
+                                             inter_fusion=inter_fusion)
     
     logging.error("Making predictions")
 

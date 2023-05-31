@@ -10,18 +10,18 @@ import tensorflow
 #from keras.utils.data_utils import OrderedEnqueuer
 from tensorflow.keras.utils import OrderedEnqueuer
 
-from maxatac.utilities.constants import TRAIN_MONITOR
+from maxatac.utilities.constants import TRAIN_MONITOR, NUM_HEADS, NUM_MHA, USE_RPE, INTER_FUSION
 from maxatac.utilities.system_tools import Mute
 from maxatac.utilities.phuc_utilities import generate_numpy_arrays
 
 with Mute():
     from tensorflow.keras.models import load_model
     from maxatac.utilities.callbacks import get_callbacks
-    from maxatac.utilities.training_tools import DataGenerator, MaxATACModel, ROIPool, SeqDataGenerator, model_selection, save_metadata
+    from maxatac.utilities.pretraining_tools import DataGenerator, MaxATACModel, ROIPool, SeqDataGenerator, model_selection, save_metadata
     from maxatac.utilities.plot import export_binary_metrics, export_loss_mse_coeff, export_model_structure, plot_attention_weights
 
 
-def run_training(args):
+def run_pretraining(args):
     """
     Train a maxATAC model using ATAC-seq and ChIP-seq data
 
@@ -50,8 +50,6 @@ def run_training(args):
 
     :returns: Trained models saved after each epoch
     """
-    logging.error(args)
-    
     # Check if tf is using GPU
     print(f"Number of GPU used: {len(tensorflow.config.list_physical_devices('GPU')) > 0}")
     gpus = tensorflow.config.list_physical_devices('GPU')
@@ -77,22 +75,16 @@ def run_training(args):
 
     logging.error("Set up model parameters")
 
-    # Read model config
-    with open(args.model_config, "r") as f:
-        model_config = json.load(f)
-
     # Initialize the model with the architecture of choice
     maxatac_model = MaxATACModel(arch=args.arch,
                                  seed=args.seed,
-                                 model_config=model_config,
                                  output_directory=args.output,
                                  prefix=args.prefix,
                                  threads=args.threads,
                                  meta_path=args.meta_file,
                                  output_activation=args.output_activation,
                                  dense=args.dense,
-                                 weights=args.weights,
-                                 inter_fusion=model_config["INTER_FUSION"]
+                                 weights=args.weights
                                  )
                                  
     # Save metadata
@@ -111,7 +103,7 @@ def run_training(args):
         "/users/ngun7t/anaconda3/envs/maxatac/lib/python3.9/site-packages/maxatac/architectures/attention_module_TF.py",
         os.path.join(args.output, "attention_module_TF.py")
     )
-    if model_config["INTER_FUSION"]:
+    if INTER_FUSION:
         if args.arch == "Crossatt_transformer":
             shutil.copyfile(
                 "/users/ngun7t/anaconda3/envs/maxatac/lib/python3.9/site-packages/maxatac/architectures/multiinput_transformers.py",
@@ -138,7 +130,8 @@ def run_training(args):
                              prefix=args.prefix,
                              output_directory=maxatac_model.output_directory,
                              shuffle=True,
-                             tag="training")
+                             tag="training",
+                             use_chip_roi=args.use_chip_roi)
 
     # Import validation regions
     validate_examples = ROIPool(chroms=args.vchroms,
@@ -147,7 +140,8 @@ def run_training(args):
                                 prefix=args.prefix,
                                 output_directory=maxatac_model.output_directory,
                                 shuffle=True,
-                                tag="validation")
+                                tag="validation",
+                                use_chip_roi=args.use_chip_roi)
 
     logging.error("Initialize data generator")
 
@@ -162,8 +156,7 @@ def run_training(args):
                               chroms=args.tchroms,
                               batch_size=args.batch_size,
                               shuffle_cell_type=args.shuffle_cell_type,
-                              rev_comp_train=args.rev_comp,
-                              inter_fusion=model_config["INTER_FUSION"]
+                              rev_comp_train=args.rev_comp
                               )
 
     # (beta) load a batch of images using train_gen, take one sample as the data sample
@@ -189,8 +182,7 @@ def run_training(args):
                             chroms=args.vchroms,
                             batch_size=args.batch_size,
                             shuffle_cell_type=args.shuffle_cell_type,
-                            rev_comp_train=args.rev_comp,
-                            inter_fusion=model_config["INTER_FUSION"]
+                            rev_comp_train=args.rev_comp
                             )
 
     # Create keras.utils.sequence object from validation generator
@@ -260,4 +252,3 @@ def run_training(args):
     logging.error("Total training time: %d:%d:%d.\n" % (hours, mins, secs))
 
     sys.exit()
-    

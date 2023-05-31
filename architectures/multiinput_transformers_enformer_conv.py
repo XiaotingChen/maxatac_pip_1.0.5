@@ -28,7 +28,8 @@ with Mute():
     #    INPUT_KERNEL_SIZE, INPUT_ACTIVATION, OUTPUT_FILTERS, OUTPUT_KERNEL_SIZE, FILTERS_SCALING_FACTOR, DILATION_RATE, \
     #    OUTPUT_LENGTH, CONV_BLOCKS, PADDING, POOL_SIZE, ADAM_BETA_1, ADAM_BETA_2, DEFAULT_ADAM_LEARNING_RATE, \
     #    DEFAULT_ADAM_DECAY, NUM_HEADS, NUM_MHA, KEY_DIMS, D_FF, CONV_TOWER_CONFIGS, EMBEDDING_SIZE, POOL_SIZE_BEFORE_FLATTEN, \
-    #    DOWNSAMPLE_METHOD_CONV_TOWER, INCEPTION_BRANCHES, WHOLE_ATTENTION_KWARGS, USE_RPE, DM_DROPOUT_RATE, CONV_TOWER_CONFIGS_FUSION
+    #    DOWNSAMPLE_METHOD_CONV_TOWER, INCEPTION_BRANCHES, WHOLE_ATTENTION_KWARGS, USE_RPE, DM_DROPOUT_RATE, CONV_TOWER_CONFIGS_FUSION, \
+    #    GENOME_CONV_TOWER, ATAC_CONV_TOWER
 
     from maxatac.utilities.constants import KERNEL_INITIALIZER, INPUT_LENGTH, INPUT_CHANNELS, INPUT_FILTERS, \
         INPUT_KERNEL_SIZE, INPUT_ACTIVATION, OUTPUT_FILTERS, OUTPUT_KERNEL_SIZE, FILTERS_SCALING_FACTOR, DILATION_RATE, \
@@ -124,6 +125,101 @@ def get_conv_tower(
         else:
             inbound_layer = Conv1D(filters=conv_block_config["num_filters"], kernel_size=conv_block_config["kernel"], strides=2, padding="same", name=f"{base_name}_Conv_tower_block_{count}_downsampling_conv")(inbound_layer)
     
+    return inbound_layer
+
+
+def get_conv_block_enformer(
+    inbound_layer, conv_block_configs, base_name
+):
+    """
+    ConvBlock, defined in Enformer's paper
+    Includes: BN -> GeLU -> Conv
+    """
+    inbound_layer = BatchNormalization(name=base_name + f"_batch_norm")(inbound_layer)
+    inbound_layer = tf.nn.gelu(inbound_layer, name=base_name+f"_gelu")
+    inbound_layer = Conv1D(
+        filters=conv_block_configs["num_filters"],
+        kernel_size=conv_block_configs["kernel"],
+        padding=conv_block_configs["padding"],
+        strides=conv_block_configs["stride"],
+        name=base_name + f"conv"
+    )(inbound_layer)
+    return inbound_layer
+
+def get_rconv_block_enformer(
+    inbound_layer, conv_block_configs, base_name
+):
+    """
+    RConvBlock, defined in Enformer's paper
+    Includes a residual over the ConvBlock
+    """
+    conv_output = get_conv_block_enformer(inbound_layer, conv_block_configs, base_name)
+    return tf.keras.layers.Add(name=f"{base_name}_residual_add")([inbound_layer, conv_output])
+
+def get_stem_enformer(
+    inbound_layer, stem_config, base_name
+):
+    """
+    Stem layer, defined in Enformer's paper
+    Includes conv -> ConvBlock -> MaxPool without downsampling
+    """
+    stem_config_conv = stem_config["conv"]
+    stem_config_maxpool = stem_config["maxpool"]
+    inbound_layer = Conv1D(
+        filters=stem_config_conv["num_filters"],
+        kernel_size=stem_config_conv["kernel"],
+        padding=stem_config_conv["padding"],
+        strides=stem_config_conv["stride"],
+        name=base_name + f"_stem_conv"
+    )(inbound_layer)
+    inbound_layer = get_rconv_block_enformer(
+        inbound_layer,
+        stem_config["rconv"],
+        base_name=base_name + f"_rconv"
+    )
+    inbound_layer = MaxPooling1D(
+        pool_size=stem_config_maxpool["pool_size"], 
+        strides=stem_config_maxpool["strides"], 
+        padding=stem_config_maxpool["padding"], 
+        name=f"{base_name}_maxpool"
+    )(inbound_layer)
+    return inbound_layer
+
+
+def get_conv_tower_enformer(
+    inbound_layer, stem_enformer_configs, 
+    conv_block_enformer_configs, rconv_block_enformer_configs, maxpool_enformer_configs,
+    base_name
+):
+    """
+    Get the conv tower in style of Enformer's conv tower (replace attentionpool with maxpool):
+        - Stem: conv -> RConvBlock -> MaxPooling
+        - ConvBlock -> RConvBlock -> MaxPooling
+        - [BN -> GeLU -> Conv] -> [(BN -> GeLU -> Conv) + residual] -> maxPool
+    Input has shape (batch_size, seq_len, feature_dim)
+    stem_enformer_configs is a dict
+    conv_tower_enformer_configs, rconv_tower_enformer_configs, maxpool_enformer_configs is a list of dict
+    """
+    # Get output from the stem
+    inbound_layer = get_stem_enformer(
+        inbound_layer, stem_enformer_configs, f"{base_name}_stem"
+    )
+    for i in range(len(conv_block_enformer_configs)):
+        conv = conv_block_enformer_configs[i]
+        rconv = rconv_block_enformer_configs[i]
+        maxpool = maxpool_enformer_configs[i]
+        inbound_layer = get_conv_block_enformer(
+            inbound_layer, conv, base_name=f"{base_name}_convblock_{i+1}"
+        )
+        inbound_layer = get_rconv_block_enformer(
+            inbound_layer, rconv, base_name=f"{base_name}_rconvblock_{i+1}"
+        )
+        inbound_layer = MaxPooling1D(
+            pool_size=maxpool["pool_size"], 
+            strides=maxpool["strides"], 
+            padding=maxpool["padding"], 
+            name=f"{base_name}_maxpool_{i+1}"
+        )(inbound_layer)
     return inbound_layer
 
 
@@ -244,22 +340,17 @@ def get_multiinput_transformer(
         adam_learning_rate=DEFAULT_ADAM_LEARNING_RATE,
         adam_decay=DEFAULT_ADAM_DECAY,
         input_length=INPUT_LENGTH,
-        input_channels=INPUT_CHANNELS,
         input_filters=INPUT_FILTERS,
-        input_kernel_size=INPUT_KERNEL_SIZE,
         input_activation=INPUT_ACTIVATION,
         output_filters=OUTPUT_FILTERS,
         output_kernel_size=OUTPUT_KERNEL_SIZE,
-        filters_scaling_factor=FILTERS_SCALING_FACTOR,
         dilation_rate=DILATION_RATE,
         output_length=OUTPUT_LENGTH,
-        conv_blocks=CONV_BLOCKS,
         padding=PADDING,
-        pool_size=POOL_SIZE,
         adam_beta_1=ADAM_BETA_1,
         adam_beta_2=ADAM_BETA_2,
-        target_scale_factor=1,
         dense_b=False,
+        target_scale_factor=1,
         weights=None
 ):
     """
@@ -278,37 +369,19 @@ def get_multiinput_transformer(
     atacseq_layer = atacseq_input
     filters = input_filters  # redefined in encoder/decoder loops
 
-    genome_layer = get_layer(
-        inbound_layer=genome_layer,
-        filters=filters,
-        kernel_size=input_kernel_size,
-        activation=input_activation,
-        padding=padding,
-        dilation_rate=1,
-        kernel_initializer=KERNEL_INITIALIZER,
-        n=1
-    )
-    atacseq_layer = get_layer(
-        inbound_layer=atacseq_layer,
-        filters=filters,
-        kernel_size=input_kernel_size,
-        activation=input_activation,
-        padding=padding,
-        dilation_rate=1,
-        kernel_initializer=KERNEL_INITIALIZER,
-        n=1
-    )
-
     # Get the conv tower for each branch
-    genome_layer = get_conv_tower(genome_layer, model_config["CONV_TOWER_CONFIGS_FUSION"]["genome"], model_config["DOWNSAMPLE_METHOD_CONV_TOWER"], "genome")
-    atacseq_layer = get_conv_tower(atacseq_layer, model_config["CONV_TOWER_CONFIGS_FUSION"]["atac"], model_config["DOWNSAMPLE_METHOD_CONV_TOWER"], "atac")
+    genome_stem, genome_conv, genome_rconv, genome_maxpool = model_config["GENOME_CONV_TOWER"]
+    genome_layer = get_conv_tower_enformer(
+        genome_layer, genome_stem, genome_conv, genome_rconv, genome_maxpool, base_name="genome"
+    )
+    atac_stem, atac_conv, atac_rconv, atac_maxpool = model_config["ATAC_CONV_TOWER"]
+    atacseq_layer = get_conv_tower_enformer(
+        atacseq_layer, atac_stem, atac_conv, atac_rconv, atac_maxpool, base_name="atac"
+    )
 
     # genome_layer and atacseq_layer now should have shape (batch, seq_len, mha_embed_dim // 2)
     # Concatenate the two and pass it through another conv layer
     layer = tf.keras.layers.Concatenate(axis=1)([genome_layer, atacseq_layer])
-
-    if model_config["CONV_TOWER_CONFIGS_FUSION"]["merge"] != {}:
-        layer = get_conv_block(layer, model_config["CONV_TOWER_CONFIGS_FUSION"]["merge"], "Intermediate_fusion_conv")
 
     # get seq_len after the conv tower
     seq_len = layer.shape[1]
@@ -331,7 +404,7 @@ def get_multiinput_transformer(
                 channels=model_config["EMBEDDING_SIZE"],
                 dropout_rate=model_config["DM_DROPOUT_RATE"],
                 attention_kwargs=new_rpe_attention_kwargs,
-                name=f"Transformer_block_{i}"
+                name=f"Transformer_block_new_{i}"
             )
             outputs = deepmind_transformer_block(layer)
             logging.error(f"Length of transformer block output: {len(outputs)}")
@@ -387,7 +460,7 @@ def get_multiinput_transformer(
             lr=adam_learning_rate,
             beta_1=adam_beta_1,
             beta_2=adam_beta_2,
-            decay=adam_decay
+            weight_decay=adam_decay
         ),
         loss=loss_function,
         metrics=[dice_coef]
@@ -395,8 +468,7 @@ def get_multiinput_transformer(
 
     logging.debug("Model compiled")
 
-    if weights is not None and weights != "":
-        logging.error(f"The weights: {weights}")
+    if weights is not None:
         model.load_weights(weights)
         logging.debug("Weights loaded")
 
