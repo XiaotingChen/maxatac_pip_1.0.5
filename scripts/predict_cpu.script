@@ -1,0 +1,18 @@
+#BSUB -W 24:00
+#BSUB -n 16
+#BSUB -M 80000
+#BSUB -R "span[ptile=16]"
+#BSUB -e logs/%J.err
+#BSUB -o logs/%J.out
+
+# load modules
+module load bedtools/2.29.2-wrl
+module load gcc/8.3.0
+module load cuda/11.5
+source activate maxatac
+
+# the main command
+
+cd /data/weirauchlab/team/ngun7t/maxatac/runs
+
+maxatac predict --tf CTCF --signal /data/weirauchlab/team/ngun7t/maxatac/test_data/GM12878_CTCF_chr1.bw --chromosomes chr1 -n ../prediction_results/TEST_GM12878_CTCF

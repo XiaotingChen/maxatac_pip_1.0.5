@@ -16,7 +16,8 @@ def main(argsl=None):
     
     args = parse_arguments(argsl)
     setup_logger(args.loglevel, LOG_FORMAT)
-    print_args(args, logging.debug)
+    logging.error(f"Args: {args}")
+    print_args(args, logging.error)
     args.func(args)
 
 

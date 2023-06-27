@@ -304,28 +304,26 @@ def get_dilated_cnn(
         output_layer = Dense(output_length, activation=output_activation, kernel_initializer='glorot_uniform')(
             output_layer)
 
-    print("Pass all model")
+
     logging.debug("Added outputs layer: " + "\n - " + str(output_layer))
 
     # Model
     model = Model(inputs=[input_layer], outputs=[output_layer])
-    print("Pass build model")
 
     model.compile(
         optimizer=Adam(
             lr=adam_learning_rate,
             beta_1=adam_beta_1,
             beta_2=adam_beta_2,
-            weight_decay=adam_decay
+            decay=adam_decay
         ),
         loss=loss_function,
         metrics=[dice_coef]
     )
-    print("Pass compiled")
 
     logging.debug("Model compiled")
 
-    if weights is not None:
+    if weights is not None and weights != "":
         model.load_weights(weights)
         logging.debug("Weights loaded")
 
@@ -439,6 +437,13 @@ def get_dilated_cnn_with_attention(
     # Model
     model = Model(inputs=[input_layer], outputs=[output_layer])
 
+    # Caveat: When loading weights into the model, meaning the model has been pre-trained,
+    # it is recommended to freeze the Batch Norm layers
+    # https://www.tensorflow.org/guide/keras/transfer_learning
+    if weights is not None:
+        batch_norm_layers = [l for l in model.layers if isinstance(l, tf.keras.layers.BatchNormalization)]
+        for l in batch_norm_layers: l.trainable = False
+
     model.compile(
         optimizer=Adam(
             lr=adam_learning_rate,
@@ -452,7 +457,7 @@ def get_dilated_cnn_with_attention(
 
     logging.debug("Model compiled")
 
-    if weights is not None:
+    if weights is not None and weights != "":
         model.load_weights(weights)
         logging.debug("Weights loaded")
 

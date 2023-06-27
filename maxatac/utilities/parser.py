@@ -15,6 +15,7 @@ with Mute():
     from maxatac.analyses.average import run_averaging
     from maxatac.analyses.predict import run_prediction
     from maxatac.analyses.train import run_training
+    from maxatac.analyses.pretrain import run_pretraining
     from maxatac.analyses.normalize import run_normalization
     from maxatac.analyses.benchmark import run_benchmarking
     from maxatac.analyses.peaks import run_call_peaks
@@ -22,6 +23,7 @@ with Mute():
     from maxatac.analyses.prepare import run_prepare
     from maxatac.analyses.threshold import run_thresholding
     from maxatac.analyses.data import run_data
+    from maxatac.analyses.transformer_interpret import run_transformer_interpret
 
 
 from maxatac.utilities.phuc_utilities import phuc_func
@@ -44,7 +46,7 @@ from maxatac.utilities.constants import (DEFAULT_TRAIN_VALIDATE_CHRS,
                                          DEFAULT_BENCHMARKING_BIN_SIZE,
                                          ALL_CHRS,
                                          AUTOSOMAL_CHRS,
-                                         REFERENCE_SEQUENCE_TWOBIT
+                                         REFERENCE_SEQUENCE_TWOBIT,
                                          )
 
 
@@ -108,7 +110,40 @@ def get_parser():
     phuc_parser.add_argument("--ablation_random_genome_file", type=str, default="", required=False,
                             help="Perform ablation study on the genome"
                             )
+    phuc_parser.add_argument("--compare_training_and_zorn", nargs="+", default=[], required=False,
+                            help="Make visualizations to compare training and Zorn dataset. Pass in 3 values: peak or non-peak, name of train cell type, name of zorn cell type"
+                            )
+    phuc_parser.add_argument("--count_peaks", nargs="+", default=[], required=False,
+                            help="Count peaks and the confusion matrix for bigwig files"
+                            )
+    phuc_parser.add_argument("--atac_jointplot", nargs="+", default=[], required=False,
+                            help="Create joint plot of ATAC-seq signal"
+                            )
     phuc_parser.add_argument("--loglevel",
+                                dest="loglevel",
+                                type=str,
+                                default=LOG_LEVELS[DEFAULT_LOG_LEVEL],
+                                choices=LOG_LEVELS.keys(),
+                                help="Logging level. Default: " + DEFAULT_LOG_LEVEL
+                                )
+    
+    #############################################
+    # Transformer interpretability subparser
+    #############################################
+    transformer_parser = subparsers.add_parser("transformer", parents=[parent_parser], help="Run Phuc's functions")
+    transformer_parser.set_defaults(func=run_transformer_interpret)
+    transformer_parser.add_argument("--analysis", type=str, default="", required=True, help="Name of the analysis to run")
+    transformer_parser.add_argument("--model_config", type=str, default="", required=True, help="The JSON file that contains specifications of the model architecture")
+    transformer_parser.add_argument("--chromosome", type=str, default="chr1", help="Chromosome")
+    transformer_parser.add_argument("--meta_file", type=str, default="", help="Meta file for running analysis")
+    transformer_parser.add_argument("--output_dir", type=str, default="", help="Output dir")
+    transformer_parser.add_argument("--cell_type", type=str, default="", help="Cell type")
+    transformer_parser.add_argument("--model_base_dir", type=str, default="", help="The directory containing the model")
+    transformer_parser.add_argument("--moods_bigwig", type=str, default="", help="The MOODS bigwig file for ism_att")
+    transformer_parser.add_argument("--npeaks", type=int, default=9, help="Number of true labels in 32bp output vector")
+    transformer_parser.add_argument("--max_num_samples", type=int, default=10, help="Number of input samples to run ism_att")
+    transformer_parser.add_argument("--dim_reduction_technique", type=str, default="pca", help="Technique for dimensionality reduction")
+    transformer_parser.add_argument("--loglevel",
                                 dest="loglevel",
                                 type=str,
                                 default=LOG_LEVELS[DEFAULT_LOG_LEVEL],
@@ -242,6 +277,28 @@ def get_parser():
                                 default=REFERENCE_SEQUENCE_TWOBIT,
                                 help="Genome sequence hg38.2bit file."
                                 )
+    
+    predict_parser.add_argument("--debug",
+                                dest="debug",
+                                type=bool,
+                                required=False,
+                                default=False,
+                                help="In debug mode, print out several things"
+                                )
+
+    predict_parser.add_argument("--train_json",
+                                dest="train_json",
+                                type=str,
+                                required=True,
+                                help="The JSON file that contains user-defined arguments for training"
+                                )
+    
+    predict_parser.add_argument("--model_config",
+                                dest="model_config",
+                                type=str,
+                                required=True,
+                                help="The JSON file that contains specifications of the model architecture"
+                                )
 
 
     predict_parser.add_argument("--multiprocessing",
@@ -365,10 +422,11 @@ def get_parser():
 
     # Add arguments to the parser
 
-    train_parser.add_argument("--phuc_generate_np_from_train",
+    train_parser.add_argument("--model_config",
                               type=str,
                               default="",
-                              help="An option to generate numpy arrays from input data to train. If this option is not None then the model will not be trained"
+                              required=True,
+                              help="The JSON file that contains specifications of the model architecture"
                               )
 
 
@@ -465,6 +523,7 @@ def get_parser():
     train_parser.add_argument("--weights",
                               dest="weights",
                               type=str,
+                              default="",
                               help="Weights to initialize model before training. Default: do not load"
                               )
 
@@ -548,6 +607,208 @@ def get_parser():
                               )
 
     train_parser.add_argument("--rev_comp",
+                              dest="rev_comp",
+                              action="store_true",
+                              default=False,
+                              help="If rev_comp, then use the reverse complement in training"
+                              )
+    
+    #############################################
+    # Pretrain parser
+    #############################################
+    pretrain_parser = subparsers.add_parser("pretrain",
+                                         parents=[parent_parser],
+                                         help="Pretrain maxATAC BERT-style"
+                                         )
+
+    # Set the default function
+    pretrain_parser.set_defaults(func=run_pretraining)
+
+    # Add arguments to the parser
+    #pretrain_parser.add_argument("--use_chip_roi",
+    #                          dest="use_chip_roi",
+    #                          type=bool,
+    #                          default=PRETRAINING_USE_CHIP_ROI,
+    #                          help="Option of whether to use ChIP ROIs to train the models or only use ATAC-peak-centric ROIs"
+    #                          )
+
+    pretrain_parser.add_argument("--sequence",
+                              dest="sequence",
+                              type=str,
+                              default=REFERENCE_SEQUENCE_TWOBIT,
+                              help="Genome sequence 2bit file"
+                              )
+
+    pretrain_parser.add_argument("--meta_file",
+                              dest="meta_file",
+                              type=str,
+                              required=True,
+                              help="Meta file containing ATAC Signal and peak path for all cell lines (.tsv format)"
+                              )
+
+    pretrain_parser.add_argument("--train_roi",
+                              dest="train_roi",
+                              type=str,
+                              required=False,
+                              help="Optional BED format file that will be used as the training regions of interest "
+                                   "instead of using the peak files to build training regions"
+                              )
+
+    pretrain_parser.add_argument("--validate_roi",
+                              dest="validate_roi",
+                              type=str,
+                              required=False,
+                              help="Optional BED format file that will be used as the validation regions of interest "
+                                   "instead of using the peak files to build validation regions"
+                              )
+
+    pretrain_parser.add_argument("--output_activation",
+                              dest="output_activation",
+                              type=str,
+                              required=False,
+                              default="sigmoid",
+                              help="Activation function used for model output layer. Default: sigmoid"
+                              )
+
+    pretrain_parser.add_argument("--chroms",
+                              dest="chroms",
+                              type=str,
+                              nargs="+",
+                              required=False,
+                              default=DEFAULT_TRAIN_VALIDATE_CHRS,
+                              help="Chromosome list to use for training and validation."
+                              )
+
+    pretrain_parser.add_argument("--tchroms",
+                              dest="tchroms",
+                              type=str,
+                              nargs="+",
+                              required=False,
+                              default=DEFAULT_TRAIN_CHRS,
+                              help="Chromosome list to use for training."
+                              )
+
+    pretrain_parser.add_argument("--vchroms",
+                              dest="vchroms",
+                              type=str,
+                              nargs="+",
+                              required=False,
+                              default=DEFAULT_VALIDATE_CHRS,
+                              help="Chromosome list to use for validation"
+                              )
+
+    pretrain_parser.add_argument("--arch",
+                              dest="arch",
+                              type=str,
+                              required=False,
+                              default="DCNN_V2",
+                              help="Specify the model architecture. Currently support DCNN_V2, RES_DCNN_V2, "
+                                   "MM_DCNN_V2 and MM_Res_DCNN_V2 "
+                              )
+
+    pretrain_parser.add_argument("--rand_ratio",
+                              dest="rand_ratio",
+                              type=float,
+                              required=False,
+                              default=0,
+                              help="Ratio for controlling fraction of random sequences in each training batch. "
+                                   "Default: 0 "
+                              )
+
+    pretrain_parser.add_argument("--seed",
+                              dest="seed",
+                              type=int,
+                              default=random.randint(1, 99999),
+                              help="Seed for pseudo-random generanor. Default: random int [1, 99999]"
+                              )
+
+    pretrain_parser.add_argument("--weights",
+                              dest="weights",
+                              type=str,
+                              default="",
+                              help="Weights to initialize model before training. Default: do not load"
+                              )
+
+    pretrain_parser.add_argument("--epochs",
+                              dest="epochs",
+                              type=int,
+                              default=DEFAULT_TRAIN_EPOCHS,
+                              help="Number of training epochs. Default: " + str(DEFAULT_TRAIN_EPOCHS)
+                              )
+
+    pretrain_parser.add_argument("--batches",
+                              dest="batches",
+                              type=int,
+                              default=DEFAULT_TRAIN_BATCHES_PER_EPOCH,
+                              help="Number of training batches per epoch. Default: " + str(
+                                  DEFAULT_TRAIN_BATCHES_PER_EPOCH)
+                              )
+
+    pretrain_parser.add_argument("--batch_size",
+                              dest="batch_size",
+                              type=int,
+                              default=BATCH_SIZE,
+                              help="Number of examples per batch. Default: " + str(BATCH_SIZE)
+                              )
+
+    pretrain_parser.add_argument("--val_batch_size",
+                              dest="val_batch_size",
+                              type=int,
+                              default=VAL_BATCH_SIZE,
+                              help="Number of examples per batch. Default: " + str(VAL_BATCH_SIZE)
+                              )
+
+    pretrain_parser.add_argument("--prefix",
+                              dest="prefix",
+                              type=str,
+                              default="maxatac_model",
+                              help="Output prefix. Default: weights"
+                              )
+
+    pretrain_parser.add_argument("--output",
+                              dest="output",
+                              type=str,
+                              default="./training_results",
+                              help="Folder for training results. Default: ./training_results"
+                              )
+
+    pretrain_parser.add_argument("--plot",
+                              dest="plot",
+                              action="store_true",
+                              default=True,
+                              help="Plot model structure and training history. Default: True"
+                              )
+
+    pretrain_parser.add_argument("--dense",
+                              dest="dense",
+                              action="store_true",
+                              default=False,
+                              help="If True, then make a dense layer before model output. Default: False"
+                              )
+
+    pretrain_parser.add_argument("--threads",
+                              dest="threads",
+                              type=int,
+                              default=get_cpu_count(),
+                              help="Number of processes to run training in parallel. Default: 1"
+                              )
+
+    pretrain_parser.add_argument("--loglevel",
+                              dest="loglevel",
+                              type=str,
+                              default=LOG_LEVELS[DEFAULT_LOG_LEVEL],
+                              choices=LOG_LEVELS.keys(),
+                              help="Logging level. Default: " + DEFAULT_LOG_LEVEL
+                              )
+
+    pretrain_parser.add_argument("--shuffle_cell_type",
+                              dest="shuffle_cell_type",
+                              action="store_true",
+                              default=True,
+                              help="If shuffle_cell_type, then shuffle training ROI cell type label"
+                              )
+
+    pretrain_parser.add_argument("--rev_comp",
                               dest="rev_comp",
                               action="store_true",
                               default=False,
@@ -1116,20 +1377,20 @@ def parse_arguments(argsl, cwd_abs_path=None):
         argsl.append("")  # otherwise fails with error if empty
     args, _ = get_parser().parse_known_args(argsl)
 
-    if args.func == run_training:
-        args = normalize_args(
-            args,
-            [
-                "func", "loglevel", "threads", "seed",
-                "proportion", "vchroms", "tchroms",
-                "chroms", "keep", "epochs", "batches",
-                "prefix", "plot", "lrate", "decay", "bin",
-                "minimum", "test_cell_lines", "rand_ratio",
-                "train_tf", "arch", "batch_size",
-                "val_batch_size", "target_scale_factor",
-                "output_activation", "dense", "shuffle_cell_type", "rev_comp"
-            ],
-            cwd_abs_path
-        )
+    #if args.func == run_training:
+    #    args = normalize_args(
+    #        args,
+    #        [
+    #            "func", "loglevel", "threads", "seed",
+    #            "proportion", "vchroms", "tchroms",
+    #            "chroms", "keep", "epochs", "batches",
+    #            "prefix", "plot", "lrate", "decay", "bin",
+    #            "minimum", "test_cell_lines", "rand_ratio",
+    #            "train_tf", "arch", "batch_size",
+    #            "val_batch_size", "target_scale_factor",
+    #            "output_activation", "dense", "shuffle_cell_type", "rev_comp", "weights"
+    #        ],
+    #        cwd_abs_path
+    #    )
 
     return args

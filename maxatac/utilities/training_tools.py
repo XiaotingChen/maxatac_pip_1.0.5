@@ -12,10 +12,15 @@ import os
 import glob
 
 import json
+import ntpath
+import shutil
 
 from maxatac.utilities import constants
 from maxatac.architectures.dcnn import get_dilated_cnn, get_dilated_cnn_with_attention
 from maxatac.architectures.transformers import get_transformer
+
+from maxatac.architectures.multiinput_transformers import get_multiinput_transformer
+from maxatac.architectures.multiinput_crossatt_transformers import get_multiinput_crossatt_transformer
 
 from maxatac.utilities.constants import BP_RESOLUTION, BATCH_SIZE, CHR_POOL_SIZE, INPUT_LENGTH, INPUT_CHANNELS, \
     BP_ORDER, TRAIN_SCALE_SIGNAL, BLACKLISTED_REGIONS, DEFAULT_CHROM_SIZES
@@ -36,6 +41,7 @@ class MaxATACModel(object):
 
     def __init__(self,
                  arch,
+                 model_config,
                  seed,
                  output_directory,
                  prefix,
@@ -46,7 +52,8 @@ class MaxATACModel(object):
                  target_scale_factor=TRAIN_SCALE_SIGNAL,
                  output_activation="sigmoid",
                  interpret=False,
-                 interpret_cell_type=""
+                 interpret_cell_type="",
+                 inter_fusion=False
                  ):
         """
         Initialize the maxATAC model with the input parameters and architecture
@@ -63,6 +70,7 @@ class MaxATACModel(object):
         :param interpret: Boolean for whether this is training or interpretation
         """
         self.arch = arch
+        self.model_config = model_config
         self.seed = seed
         self.output_directory = get_dir(output_directory)
         self.model_filename = prefix + "_{epoch}" + ".h5"
@@ -76,9 +84,12 @@ class MaxATACModel(object):
         self.dense = dense
         self.weights = weights
         self.target_scale_factor = target_scale_factor
+        self.inter_fusion = inter_fusion
 
         # Set the random seed for the model
         random.seed(seed)
+        np.random.seed(seed)
+        tf.random.set_seed(seed)
 
         # Import meta txt as dataframe
         self.meta_dataframe = pd.read_csv(self.meta_path, sep='\t', header=0, index_col=None)
@@ -118,12 +129,30 @@ class MaxATACModel(object):
                 weights=self.weights
             )
         elif self.arch == "Transformer_phuc":
-            return get_transformer(
-                output_activation=self.output_activation,
-                target_scale_factor=self.target_scale_factor,
-                dense_b=self.dense,
-                weights=self.weights
-            )
+
+            if (self.inter_fusion):
+                return get_multiinput_transformer(
+                    output_activation=self.output_activation,
+                    target_scale_factor=self.target_scale_factor,
+                    dense_b=self.dense,
+                    weights=self.weights,
+                    model_config=self.model_config
+                )
+            else:
+                return get_transformer(
+                    output_activation=self.output_activation,
+                    target_scale_factor=self.target_scale_factor,
+                    dense_b=self.dense,
+                    weights=self.weights,
+                    model_config=self.model_config
+                )
+        elif self.arch == "Crossatt_transformer":
+            assert self.inter_fusion, "This architecture only works with split inputs!"
+            return get_multiinput_crossatt_transformer(
+                    output_activation=self.output_activation,
+                    weights=self.weights,
+                    model_config=self.model_config
+                )
 
         else:
             sys.exit("Model Architecture not specified correctly. Please check")
@@ -140,8 +169,8 @@ def DataGenerator(
         target_scale_factor=1,
         batch_size=BATCH_SIZE,
         shuffle_cell_type=False,
-        rev_comp_train=False
-
+        rev_comp_train=False,
+        inter_fusion=False
 ):
     """
     Initiate a data generator that will yield a batch of examples for training. This generator will mix samples from a
@@ -225,7 +254,13 @@ def DataGenerator(
             inputs_batch = roi_input_batch
             targets_batch = roi_target_batch
 
-        yield inputs_batch, targets_batch  # change to yield
+        if not inter_fusion:
+            yield inputs_batch, targets_batch  # change to yield
+        else:
+            # Split the inputs_batch to the genome track and the atacseq track
+            genome_batch = inputs_batch[...,:4]
+            atac_batch = np.expand_dims(inputs_batch[...,4], axis=-1)
+            yield {"genome": genome_batch, "atac": atac_batch}, targets_batch
 
 
 def get_input_matrix(signal_stream,
@@ -662,7 +697,8 @@ def model_selection(training_history, output_dir):
     epoch = df['val_dice_coef'].idxmax() + 1
 
     # Get the realpath to the best model
-    out = pd.DataFrame([glob.glob(output_dir + "/*" + str(epoch) + ".h5")], columns=['Best_Model_Path'])
+    best_model = [glob.glob(output_dir + "/*" + str(epoch) + ".h5")[0]]
+    out = pd.DataFrame([best_model], columns=['Best_Model_Path'])
 
     # Write the location of the best model to a file
     out.to_csv(output_dir + "/" + "best_epoch.txt", sep='\t', index=None, header=None)
@@ -799,7 +835,6 @@ class GenomicRegions(object):
                          header=None,
                          names=["Chr", "Start", "Stop"],
                          low_memory=False)
-
         # Make sure the chromosomes in the ROI file frame are in the target chromosome list
         df = df[df["Chr"].isin(self.chromosomes)]
 
@@ -863,12 +898,22 @@ def save_metadata(output_dir, args):
     constants_dict = {
         name: getattr(constants, name) for name in constants_names
     }
-    with open(os.path.join(output_dir, "constants.json"), "w") as f:
+    with open(os.path.join(output_dir, "constants.json"), "w+") as f:
         json.dump(constants_dict, f, sort_keys=True, indent=3)
+
+    # Save the meta file used to train the model
+    metafile_name = ntpath.basename(args.meta_file)
+    shutil.copyfile(args.meta_file, os.path.join(output_dir, metafile_name))
 
     # Get the command line arguments and save it
     args_dict = vars(args)
     args_dict.pop("func", None)
-    with open(os.path.join(output_dir, "cmd_args.json"), "w") as f:
+
+    with open(os.path.join(output_dir, "cmd_args.json"), "w+") as f:
         json.dump(args_dict, f, sort_keys=True, indent=3)
 
+
+def get_initializer(initializer_name):
+    """
+    A helper function to get the 
+    """

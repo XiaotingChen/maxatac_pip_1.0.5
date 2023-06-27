@@ -2,17 +2,20 @@ from maxatac.utilities.system_tools import replace_extension, remove_tags, Mute
 import matplotlib.pyplot as plt
 import numpy as np
 import os
+import pandas as pd
 import seaborn as sns
+import logomaker as lm
 import pyBigWig
 
 import tensorflow as tf
 
 with Mute():
     from tensorflow.keras.utils import plot_model
+    from maxatac.utilities.transformer_interpret_tools import one_hot_to_tokens
 
 
 
-def plot_attention_weights(model, transformer_names, data_sample, num_heads, file_location):
+def plot_attention_weights(model, transformer_names, data_sample, num_heads, file_location, use_rpe):
     """
     Plot the attention weights of all heads for all transformer layers
     data_sample has shape (1, 1024, 5), 1 is the batch size and we want to keep it as 1
@@ -27,7 +30,10 @@ def plot_attention_weights(model, transformer_names, data_sample, num_heads, fil
         submodel = tf.keras.Model(model.inputs, model.get_layer(transformer_name).output)
 
         # Make an inference
-        att_weights = submodel.predict(data_sample, verbose=0)
+        if use_rpe:
+            _, att_weights = submodel.predict(data_sample, verbose=0)
+        else:
+            att_weights = submodel.predict(data_sample, verbose=0)
         seq_len = att_weights.shape[-1]
         att_weights = tf.reshape(att_weights, (-1, seq_len, seq_len))
         
@@ -41,6 +47,50 @@ def plot_attention_weights(model, transformer_names, data_sample, num_heads, fil
     plt.savefig(
         os.path.join(file_location, "attention_weights.png"),
     )
+
+
+def plot_ism_results(superseq, bases_of_interest, save_dirs):
+    """
+    Plot ISM results
+    seq has shape of seq_lenx4
+    The one hot encoded rule is ACGT
+    """
+    bases = ["A", "C", "G", "T"]
+    for i, base_of_interest in enumerate(bases_of_interest):
+        seq = superseq[i]
+        base_dict = {
+            b: seq[:, i] for i, b in enumerate(bases)
+        }
+
+        # Convert base_dict into a pd Dataframe for logo sequence
+        df = pd.DataFrame.from_dict(base_dict)
+
+        # Get the changes across the base
+        max_change = np.max(seq, axis=1)
+        min_change = np.min(seq, axis=1)
+        
+        # Plot stuff        
+        fig, ax = plt.subplots(nrows=3, ncols=1, figsize=(35, 8), sharex=True, constrained_layout=True)
+
+        # The line plot
+        ax[0].plot(max_change, label="Max positive change")
+        ax[0].plot(min_change, label="Min negative change")
+        ax[0].set_ylabel("Expression difference")
+        ax[0].legend()
+
+        # The heatmap
+        sns.heatmap(seq.T, ax=ax[1])
+        ax[1].set_title("Expression difference when changing base")
+        ax[1].set_xlabel("Base ind")
+        ax[1].set_ylabel("Expression difference")
+        #ax[1].set_xticks(list(range(len(orig_seq)-start_ind-end_ind)), list(range(start_ind, len(orig_seq)-end_ind)))
+        ax[1].set_yticks([0, 1, 2, 3], bases)
+
+        # The logo
+        lm.Logo(df, font_name = 'Arial Rounded MT Bold', ax=ax[2])
+
+        plt.savefig(save_dirs[i])
+
 
 def export_model_structure(model, file_location, suffix="_model_structure", ext=".png", skip_tags="_{epoch}"):
     plot_model(

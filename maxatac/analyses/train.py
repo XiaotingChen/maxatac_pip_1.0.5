@@ -7,9 +7,10 @@ import shutil
 import timeit
 import tensorflow
 
-from keras.utils.data_utils import OrderedEnqueuer
+#from keras.utils.data_utils import OrderedEnqueuer
+from tensorflow.keras.utils import OrderedEnqueuer
 
-from maxatac.utilities.constants import TRAIN_MONITOR, NUM_HEADS, NUM_MHA
+from maxatac.utilities.constants import TRAIN_MONITOR
 from maxatac.utilities.system_tools import Mute
 from maxatac.utilities.phuc_utilities import generate_numpy_arrays
 
@@ -50,39 +51,54 @@ def run_training(args):
 
     :returns: Trained models saved after each epoch
     """
+    logging.error(args)
+    
     # Check if tf is using GPU
-    assert len(tensorflow.config.list_physical_devices('GPU')) > 0, "Tensorflow is not using GPU"
+    print(f"Number of GPU used: {len(tensorflow.config.list_physical_devices('GPU')) > 0}")
     gpus = tensorflow.config.list_physical_devices('GPU')
     if gpus:
         try:
+            print(gpus)
             # Currently, memory growth needs to be the same across GPUs
-            for gpu in gpus:
-                tensorflow.config.experimental.set_memory_growth(gpu, True)
+            #for gpu in gpus:
+            #    tensorflow.config.experimental.set_memory_growth(gpu, True)
             logical_gpus = tensorflow.config.list_logical_devices('GPU')
-            logging.error(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
+            logging.error(f"{len(gpus)} Physical GPUs, {len(logical_gpus)}, Logical GPUs")
         except RuntimeError as e:
             # Memory growth must be set before GPUs have been initialized
             print(e)
+
+    if tensorflow.test.gpu_device_name():
+        print('GPU device found')
+    else:
+        print("No GPU found")
     
     # Start Timer
     startTime = timeit.default_timer()
 
-    # Save metadata
-    save_metadata(args.output, args)
-
     logging.error("Set up model parameters")
+
+
+    # Read model config
+    with open(args.model_config, "r") as f:
+        model_config = json.load(f)
 
     # Initialize the model with the architecture of choice
     maxatac_model = MaxATACModel(arch=args.arch,
                                  seed=args.seed,
+                                 model_config=model_config,
                                  output_directory=args.output,
                                  prefix=args.prefix,
                                  threads=args.threads,
                                  meta_path=args.meta_file,
                                  output_activation=args.output_activation,
                                  dense=args.dense,
-                                 weights=args.weights
+                                 weights=args.weights,
+                                 inter_fusion=model_config["INTER_FUSION"]
                                  )
+                                 
+    # Save metadata
+    save_metadata(args.output, args)
 
     ## Save the args and the constants to the output folder
     #with open(os.path.join(args.output, "user_args.txt"), "w") as f:
@@ -93,6 +109,26 @@ def run_training(args):
         "/users/ngun7t/anaconda3/envs/maxatac/lib/python3.9/site-packages/maxatac/utilities/constants.py",
         os.path.join(args.output, "constants.py")
     )
+    shutil.copyfile(
+        "/users/ngun7t/anaconda3/envs/maxatac/lib/python3.9/site-packages/maxatac/architectures/attention_module_TF.py",
+        os.path.join(args.output, "attention_module_TF.py")
+    )
+    if model_config["INTER_FUSION"]:
+        if args.arch == "Crossatt_transformer":
+            shutil.copyfile(
+                "/users/ngun7t/anaconda3/envs/maxatac/lib/python3.9/site-packages/maxatac/architectures/multiinput_transformers.py",
+                os.path.join(args.output, "multiinput_crossatt_transformers.py")
+            )
+        else:
+            shutil.copyfile(
+                "/users/ngun7t/anaconda3/envs/maxatac/lib/python3.9/site-packages/maxatac/architectures/multiinput_transformers.py",
+                os.path.join(args.output, "multiinput_transformers.py")
+            )
+    else:
+        shutil.copyfile(
+            "/users/ngun7t/anaconda3/envs/maxatac/lib/python3.9/site-packages/maxatac/architectures/transformers.py",
+            os.path.join(args.output, "transformers.py")
+        )
     
     logging.error("Import training regions")
 
@@ -131,7 +167,8 @@ def run_training(args):
                               chroms=args.tchroms,
                               batch_size=args.batch_size,
                               shuffle_cell_type=args.shuffle_cell_type,
-                              rev_comp_train=args.rev_comp
+                              rev_comp_train=args.rev_comp,
+                              inter_fusion=model_config["INTER_FUSION"]
                               )
 
 
@@ -162,7 +199,8 @@ def run_training(args):
                             chroms=args.vchroms,
                             batch_size=args.batch_size,
                             shuffle_cell_type=args.shuffle_cell_type,
-                            rev_comp_train=args.rev_comp
+                            rev_comp_train=args.rev_comp,
+                            inter_fusion=model_config["INTER_FUSION"]
                             )
 
     # Create keras.utils.sequence object from validation generator
@@ -212,9 +250,12 @@ def run_training(args):
         export_binary_metrics(training_history, tf, RR, ARC, maxatac_model.results_location, best_epoch)
         export_model_structure(maxatac_model.nn_model, maxatac_model.results_location)
 
-        data_sample = tensorflow.expand_dims(input_batch[0], axis=0)
-        mha_names = [f"Encoder_{i}_softmax_att_weights" for i in range(NUM_MHA)]
-        plot_attention_weights(maxatac_model.nn_model, mha_names, data_sample, num_heads=NUM_HEADS, file_location=args.output)
+        #data_sample = tensorflow.expand_dims(input_batch[0], axis=0)
+        #if not(USE_RPE):
+        #    mha_names = [f"Encoder_{i}_softmax_att_weights" for i in range(NUM_MHA)]
+        #else:
+        #    mha_names = [f"Transformer_block_{i}" for i in range(NUM_MHA)]
+        #plot_attention_weights(maxatac_model.nn_model, mha_names, data_sample, num_heads=NUM_HEADS, file_location=args.output)
 
     logging.error("Results are saved to: " + maxatac_model.results_location)
     

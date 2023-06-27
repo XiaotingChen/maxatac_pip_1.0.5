@@ -3,7 +3,7 @@ import numpy as np
 import math
 from scipy import stats
 from maxatac.utilities.system_tools import Mute
-
+from copy import deepcopy
 
 with Mute():
     import tensorflow as tf
@@ -13,11 +13,13 @@ with Mute():
         Input,
         Conv1D,
         MaxPooling1D,
+        AveragePooling1D,
         Lambda,
         BatchNormalization,
         Dense,
         Flatten,
     )
+    from tensorflow.keras import initializers
     from tensorflow.keras.activations import relu, gelu
     from tensorflow.keras.models import Model
     from tensorflow.keras.optimizers import Adam
@@ -25,9 +27,45 @@ with Mute():
     from maxatac.utilities.constants import KERNEL_INITIALIZER, INPUT_LENGTH, INPUT_CHANNELS, INPUT_FILTERS, \
         INPUT_KERNEL_SIZE, INPUT_ACTIVATION, OUTPUT_FILTERS, OUTPUT_KERNEL_SIZE, FILTERS_SCALING_FACTOR, DILATION_RATE, \
         OUTPUT_LENGTH, CONV_BLOCKS, PADDING, POOL_SIZE, ADAM_BETA_1, ADAM_BETA_2, DEFAULT_ADAM_LEARNING_RATE, \
-        DEFAULT_ADAM_DECAY, NUM_HEADS, NUM_MHA, KEY_DIMS, D_FF, CONV_TOWER_CONFIGS, EMBEDDING_SIZE, POOL_SIZE_BEFORE_FLATTEN, DOWNSAMPLE_METHOD_CONV_TOWER
+        DEFAULT_ADAM_DECAY, NUM_HEADS, NUM_MHA, KEY_DIMS, D_FF, CONV_TOWER_CONFIGS, EMBEDDING_SIZE, POOL_SIZE_BEFORE_FLATTEN, \
+        DOWNSAMPLE_METHOD_CONV_TOWER, INCEPTION_BRANCHES, WHOLE_ATTENTION_KWARGS, USE_RPE, DM_DROPOUT_RATE
 
     from maxatac.architectures.dcnn import loss_function, dice_coef, get_layer
+    from maxatac.architectures.attention_module_TF import TransformerBlock
+
+def get_inception_block(
+    inbound_layer, inception_branches, base_name
+):
+    """
+    Get an inception block. The motivation is that, the motif can have multiple lengths, so using the inception block with multiple paths may capture this pattern
+    Let's say the input has shape (batch, seq_len, embed_dim), after inception it is (batch, seq_len, embed_dim)
+    The 4 filter sizes can be 7, 10, 13, and 16, with padding same and stride 1
+    We can use 1x1 conv to reduce the embed dim like in the paper
+    """
+    outputs = []
+    embed_dim = inbound_layer.shape[-1]
+    assert embed_dim % len(inception_branches) == 0, "Embed dim has to be a multiple of number of branches"
+    for i, branch in enumerate(inception_branches):
+
+        # Each branch is a conv block with a conv + batch_norm + activation
+        temp_layer = inbound_layer
+        for j, block in enumerate(branch):
+            if block["name"] == "conv":
+                temp_layer = get_conv_block(temp_layer, block, f"{base_name}_branch_{i}_block_{j}")
+            else:
+                temp_layer = AveragePooling1D(
+                    pool_size=block["pool_size"],
+                    strides=block["stride"],
+                    padding=block["padding"],
+                    name=f"{base_name}_avgpool_branch_{i}_block_{j}"
+                )(temp_layer)
+
+        outputs.append(temp_layer)
+
+    # Reshape the output into the desired shape
+    output_layer = tf.keras.layers.Concatenate(axis=-1)(outputs)    
+    return output_layer
+
 
 def get_conv_block(
     inbound_layer, conv_block_config, base_name
@@ -104,11 +142,12 @@ def get_positional_encoding(
 
     pos_encoding = np.concatenate(
         [np.sin(angle_rads), np.cos(angle_rads)],
-        axis=-1) 
+        axis=-1)
 
     pos_encoding = tf.cast(pos_encoding, dtype=tf.float32)
     # Use Add layer to add the name to the layer
     inbound_layer = tf.keras.layers.Add(name="Add_positional_encoding")([inbound_layer, pos_encoding[tf.newaxis, :seq_len, :]])
+    #inbound_layer = inbound_layer + pos_encoding[tf.newaxis, :seq_len, :]
 
     return inbound_layer
 
@@ -148,6 +187,7 @@ def get_feed_forward_nn(
     ffnn_output = activation(dense_1(inbound_layer))
     ffnn_output = dense_2(ffnn_output)
     inbound_layer = residual([inbound_layer, layer_norm(ffnn_output)])
+    #inbound_layer = inbound_layer + layer_norm(ffnn_output)
 
     return inbound_layer
 
@@ -188,13 +228,18 @@ def get_multihead_attention_custom(
 
     # Pass through layer norm and add residual
     layer_norm = tf.keras.layers.LayerNormalization(name=base_name + "_layernorm_in_mha")(output)
-    output = tf.keras.layers.Add(name=base_name + "_residual_in_mha")([inbound_layer, layer_norm]) 
+    output = tf.keras.layers.Add(name=base_name + "_residual_in_mha")([inbound_layer, layer_norm])
+    #inbound_layer = inbound_layer + layer_norm
 
     return output, att_weights
 
 def get_transformer(
         output_activation,
+        rpe_attention_kwargs=WHOLE_ATTENTION_KWARGS,
+        use_rpe=USE_RPE,
+        dm_dropout_rate=DM_DROPOUT_RATE,
         conv_tower_config=CONV_TOWER_CONFIGS,
+        inception_block_config=INCEPTION_BRANCHES,
         mha_embedding_dim=EMBEDDING_SIZE,
         downsample_method_conv_tower=DOWNSAMPLE_METHOD_CONV_TOWER,
         num_mha=NUM_MHA,
@@ -244,24 +289,39 @@ def get_transformer(
         padding=padding,
         dilation_rate=1,
         kernel_initializer=KERNEL_INITIALIZER,
-        n=2
+        n=1
     )
 
     # Get the conv tower (output has shape batch_size, seq_len, embed_dim)
     layer = get_conv_tower(layer, conv_tower_config, downsample_method_conv_tower)
 
+    # Add an inception block
+    #layer = get_inception_block(layer, inception_block_config, "Inception_block")
+
     # get seq_len after the conv tower
-    print(layer.shape)
     seq_len = layer.shape[1]
 
-    # A positional encoding layer
-    layer = get_positional_encoding(layer, seq_len=seq_len, depth=mha_embedding_dim)
+    if not use_rpe:
+        # A positional encoding layer
+        layer = get_positional_encoding(layer, seq_len=seq_len, depth=mha_embedding_dim)
 
-    # Stack a list of encoders
-    for i in range(num_mha):
-        # The weights are in the shape of (batch_size, num_head, seq_len, seq_len)
-        layer, att_weights = get_multihead_attention_custom(layer, key_dim, num_heads, seq_len, base_name=f"Encoder_{i}")
-        layer = get_feed_forward_nn(layer, d_ff, base_name=f"Encoder_{i}")
+        # Stack a list of encoders
+        for i in range(num_mha):
+            # The weights are in the shape of (batch_size, num_head, seq_len, seq_len)
+            layer, att_weights = get_multihead_attention_custom(layer, key_dim, num_heads, seq_len, base_name=f"Encoder_{i}")
+            layer = get_feed_forward_nn(layer, d_ff, base_name=f"Encoder_{i}")
+
+    else:
+        new_rpe_attention_kwargs = deepcopy(rpe_attention_kwargs)
+        new_rpe_attention_kwargs["initializer"] = initializers.get(rpe_attention_kwargs["initializer"])
+        for i in range(num_mha):
+            deepmind_transformer_block = TransformerBlock(
+                channels=mha_embedding_dim,
+                dropout_rate=dm_dropout_rate,
+                attention_kwargs=new_rpe_attention_kwargs,
+                name=f"Transformer_block_{i}"
+            )
+            layer, att_weights = deepmind_transformer_block(layer)
 
     # Final postprocessing
 

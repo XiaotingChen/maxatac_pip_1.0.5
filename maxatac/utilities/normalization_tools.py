@@ -68,7 +68,7 @@ def get_genomic_stats(bigwig_path: str, chrom_sizes_dict: dict, blacklist_path: 
         median_value = np.median(genome_values_array[genome_values_array > 0])
 
         # Find the median_absolute_deviation
-        median_absolute_deviation = stats.median_absolute_deviation(genome_values_array[genome_values_array > 0])
+        median_absolute_deviation = stats.median_abs_deviation(genome_values_array[genome_values_array > 0])
 
         # Find the min value based on genome min.
         min_value = minmax_results_df["min"].min()

@@ -5,6 +5,7 @@ import os
 import glob
 import timeit
 import pandas as pd
+import json
 import multiprocessing
 from multiprocessing import Pool, Manager
 from maxatac.utilities.system_tools import get_dir, Mute
@@ -63,6 +64,14 @@ def run_prediction(args):
     # Create the output directory set by the parser
     output_directory = get_dir(args.output)
 
+    # Open the training args JSON file
+    with open(args.train_json, "r") as f:
+        train_args = json.load(f)
+
+    # Open the model_config JSON file
+    with open(args.model_config, "r") as f:
+        model_config = json.load(f)
+
     # Output filename for the bigwig predictions file based on the output directory and the prefix. Add the bw extension
     outfile_name_bigwig = os.path.join(output_directory, args.prefix + ".bw")
 
@@ -94,6 +103,8 @@ def run_prediction(args):
 
         
         chrom_list = args.chromosomes
+        if args.debug:
+            regions_pool.to_csv(f"{output_directory}/regions_pool.csv")
     
     logging.error("Prediction Parameters \n" +
                   f"Output filename: {outfile_name_bigwig} \n" +
@@ -123,18 +134,24 @@ def run_prediction(args):
     else:
         forward_strand_predictions = []
         for chromosome in chrom_list:
-            forward_strand_predictions.append(make_stranded_predictions(regions_pool,
+            forward_strand_predictions.append(make_stranded_predictions(
+                                                                    model_config,
+                                                                    regions_pool,
                                                                     args.signal,
                                                                     args.sequence,
                                                                     args.model,
                                                                     args.batch_size,
                                                                     False,
-                                                                    chromosome))
+                                                                    chromosome,
+                                                                    train_args=train_args,
+                                                                    inter_fusion=model_config["INTER_FUSION"]))
 
     logging.error("Write predictions to a bigwig file")
 
     # Write the predictions to a bigwig file and add name to args
     prediction_bedgraph = pd.concat(forward_strand_predictions)
+    if args.debug:
+        prediction_bedgraph.to_csv(f"{output_directory}/prediction_bedgraph.csv")
     
     write_predictions_to_bigwig(prediction_bedgraph,
                                 output_filename=outfile_name_bigwig,
