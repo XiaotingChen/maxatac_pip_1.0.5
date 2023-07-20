@@ -128,8 +128,8 @@ class MaxATACModel(object):
                 dense_b=self.dense,
                 weights=self.weights
             )
-        elif self.arch == "Transformer_phuc":
 
+        elif self.arch == "Transformer_phuc":
             if (self.inter_fusion):
                 return get_multiinput_transformer(
                     output_activation=self.output_activation,
@@ -146,6 +146,7 @@ class MaxATACModel(object):
                     weights=self.weights,
                     model_config=self.model_config
                 )
+
         elif self.arch == "Crossatt_transformer":
             assert self.inter_fusion, "This architecture only works with split inputs!"
             return get_multiinput_crossatt_transformer(

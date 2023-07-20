@@ -99,36 +99,37 @@ def run_training(args):
                                  
     # Save metadata
     save_metadata(args.output, args)
+    export_model_structure(maxatac_model.nn_model, maxatac_model.results_location)
 
     ## Save the args and the constants to the output folder
     #with open(os.path.join(args.output, "user_args.txt"), "w") as f:
     #    json.dump(args.__dict__, f, indent=2)
 
     # This is only for this project, so please change this line of code
-    shutil.copyfile(
-        "/users/ngun7t/anaconda3/envs/maxatac/lib/python3.9/site-packages/maxatac/utilities/constants.py",
-        os.path.join(args.output, "constants.py")
-    )
-    shutil.copyfile(
-        "/users/ngun7t/anaconda3/envs/maxatac/lib/python3.9/site-packages/maxatac/architectures/attention_module_TF.py",
-        os.path.join(args.output, "attention_module_TF.py")
-    )
-    if model_config["INTER_FUSION"]:
-        if args.arch == "Crossatt_transformer":
-            shutil.copyfile(
-                "/users/ngun7t/anaconda3/envs/maxatac/lib/python3.9/site-packages/maxatac/architectures/multiinput_transformers.py",
-                os.path.join(args.output, "multiinput_crossatt_transformers.py")
-            )
-        else:
-            shutil.copyfile(
-                "/users/ngun7t/anaconda3/envs/maxatac/lib/python3.9/site-packages/maxatac/architectures/multiinput_transformers.py",
-                os.path.join(args.output, "multiinput_transformers.py")
-            )
-    else:
-        shutil.copyfile(
-            "/users/ngun7t/anaconda3/envs/maxatac/lib/python3.9/site-packages/maxatac/architectures/transformers.py",
-            os.path.join(args.output, "transformers.py")
-        )
+    # shutil.copyfile(
+    #     "/users/ngun7t/anaconda3/envs/maxatac/lib/python3.9/site-packages/maxatac/utilities/constants.py",
+    #     os.path.join(args.output, "constants.py")
+    # )
+    # shutil.copyfile(
+    #     "/users/ngun7t/anaconda3/envs/maxatac/lib/python3.9/site-packages/maxatac/architectures/attention_module_TF.py",
+    #     os.path.join(args.output, "attention_module_TF.py")
+    # )
+    # if model_config["INTER_FUSION"]:
+    #     if args.arch == "Crossatt_transformer":
+    #         shutil.copyfile(
+    #             "/users/ngun7t/anaconda3/envs/maxatac/lib/python3.9/site-packages/maxatac/architectures/multiinput_transformers.py",
+    #             os.path.join(args.output, "multiinput_crossatt_transformers.py")
+    #         )
+    #     else:
+    #         shutil.copyfile(
+    #             "/users/ngun7t/anaconda3/envs/maxatac/lib/python3.9/site-packages/maxatac/architectures/multiinput_transformers.py",
+    #             os.path.join(args.output, "multiinput_transformers.py")
+    #         )
+    # else:
+    #     shutil.copyfile(
+    #         "/users/ngun7t/anaconda3/envs/maxatac/lib/python3.9/site-packages/maxatac/architectures/transformers.py",
+    #         os.path.join(args.output, "transformers.py")
+    #     )
     
     logging.error("Import training regions")
 
@@ -248,7 +249,7 @@ def run_training(args):
         RR = args.rand_ratio
 
         export_binary_metrics(training_history, tf, RR, ARC, maxatac_model.results_location, best_epoch)
-        export_model_structure(maxatac_model.nn_model, maxatac_model.results_location)
+        #export_model_structure(maxatac_model.nn_model, maxatac_model.results_location)
 
         #data_sample = tensorflow.expand_dims(input_batch[0], axis=0)
         #if not(USE_RPE):

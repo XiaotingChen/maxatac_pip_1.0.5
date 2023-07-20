@@ -192,7 +192,9 @@ def get_layer(
         concat_layer=None,
         transpose_kernel_size=None,
         transpose_strides=None,
-        n=2
+        n=2,
+        use_bias=True,
+        name=None
 ):
     """
     Returns new layer without max pooling. If concat_layer,
@@ -201,13 +203,15 @@ def get_layer(
     can skip batch normalization
     """
     for i in range(n):
-        inbound_layer = Conv1D(
+        inbound_layer=Conv1D(
             filters=filters,
             kernel_size=kernel_size,
             activation=activation,
             padding=padding,
             dilation_rate=dilation_rate,
-            kernel_initializer=kernel_initializer
+            kernel_initializer=kernel_initializer,
+            use_bias=use_bias,
+            name=name
         )(inbound_layer)
         if not skip_batch_norm:
             inbound_layer = BatchNormalization()(inbound_layer)

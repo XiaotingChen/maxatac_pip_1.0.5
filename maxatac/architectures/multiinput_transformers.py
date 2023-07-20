@@ -33,7 +33,7 @@ with Mute():
     from maxatac.utilities.constants import KERNEL_INITIALIZER, INPUT_LENGTH, INPUT_CHANNELS, INPUT_FILTERS, \
         INPUT_KERNEL_SIZE, INPUT_ACTIVATION, OUTPUT_FILTERS, OUTPUT_KERNEL_SIZE, FILTERS_SCALING_FACTOR, DILATION_RATE, \
         OUTPUT_LENGTH, CONV_BLOCKS, PADDING, POOL_SIZE, ADAM_BETA_1, ADAM_BETA_2, DEFAULT_ADAM_LEARNING_RATE, \
-        DEFAULT_ADAM_DECAY
+        DEFAULT_ADAM_DECAY, BASENJI_INPUT_KERNEL_SIZE, BASENJI_INPUT_FILTERS, ENFORMER_INPUT_KERNEL_SIZE, ENFORMER_INPUT_FILTERS
 
     from maxatac.architectures.dcnn import loss_function, dice_coef, get_layer
     from maxatac.architectures.attention_module_TF import TransformerBlock
@@ -260,7 +260,8 @@ def get_multiinput_transformer(
         adam_beta_2=ADAM_BETA_2,
         target_scale_factor=1,
         dense_b=False,
-        weights=None
+        weights=None,
+
 ):
     """
     If weights are provided they will be loaded into created model
@@ -278,21 +279,49 @@ def get_multiinput_transformer(
     atacseq_layer = atacseq_input
     filters = input_filters  # redefined in encoder/decoder loops
 
-    genome_layer = get_layer(
-        inbound_layer=genome_layer,
-        filters=filters,
-        kernel_size=input_kernel_size,
-        activation=input_activation,
-        padding=padding,
-        dilation_rate=1,
-        kernel_initializer=KERNEL_INITIALIZER,
-        n=1
-    )
+    if 'USING_BASENJI_KERNEL' in model_config.keys() and model_config['USING_BASENJI_KERNEL']:
+        genome_layer = get_layer(
+            inbound_layer=genome_layer,
+            filters=BASENJI_INPUT_FILTERS,
+            kernel_size=BASENJI_INPUT_KERNEL_SIZE,
+            activation='linear',
+            padding=padding,
+            dilation_rate=1,
+            kernel_initializer=KERNEL_INITIALIZER,
+            n=1,
+            use_bias=False,
+            name="first_conv_kernel"
+        )
+    elif 'USING_ENFORMER_KERNEL' in model_config.keys() and model_config['USING_ENFORMER_KERNEL']:
+        genome_layer = get_layer(
+            inbound_layer=genome_layer,
+            filters=ENFORMER_INPUT_FILTERS,
+            kernel_size=ENFORMER_INPUT_KERNEL_SIZE,
+            activation='linear',
+            padding=padding,
+            dilation_rate=1,
+            kernel_initializer=KERNEL_INITIALIZER,
+            n=1,
+            use_bias=False,
+            name="first_conv_kernel"
+        )
+    else:
+        genome_layer = get_layer(
+            inbound_layer=genome_layer,
+            filters=filters,
+            kernel_size=input_kernel_size,
+            activation='linear',
+            padding=padding,
+            dilation_rate=1,
+            kernel_initializer=KERNEL_INITIALIZER,
+            n=1,
+            name="first_conv_kernel"
+        )
     atacseq_layer = get_layer(
         inbound_layer=atacseq_layer,
         filters=filters,
         kernel_size=input_kernel_size,
-        activation=input_activation,
+        activation='linear',
         padding=padding,
         dilation_rate=1,
         kernel_initializer=KERNEL_INITIALIZER,
@@ -382,12 +411,38 @@ def get_multiinput_transformer(
     # Model
     model = Model(inputs=[genome_input, atacseq_input], outputs=output_layer)
 
+    if 'USING_BASENJI_KERNEL' in model_config.keys() and model_config['USING_BASENJI_KERNEL']:
+        try:
+            import pickle
+            pickled_weight_file = model_config['BASENJI_KERNEL_PICKLED_FILE']
+            with open(pickled_weight_file, 'rb') as f:
+                _weights = pickle.load(f)
+            for layer in model.layers:
+                if layer.name=='first_conv_kernel':
+                    layer.set_weights(_weights)
+                    layer.trainable=model_config['BASENJI_KERNEL_TRAINABLE']
+        except:
+            logging.error("Failed to set BASENJI kernel weights.")
+            raise ValueError("Failed to set BASENJI kernel weights.")
+    if 'USING_ENFORMER_KERNEL' in model_config.keys() and model_config['USING_ENFORMER_KERNEL']:
+        try:
+            import pickle
+            pickled_weight_file = model_config['ENFORMER_KERNEL_PICKLED_FILE']
+            with open(pickled_weight_file, 'rb') as f:
+                _weights = pickle.load(f)
+            for layer in model.layers:
+                if layer.name == 'first_conv_kernel':
+                    layer.set_weights(_weights)
+                    layer.trainable = model_config['ENFORMER_KERNEL_TRAINABLE']
+        except:
+            logging.error("Failed to set ENFORMER kernel weights.")
+            raise ValueError("Failed to set ENFORMER kernel weights.")
     model.compile(
         optimizer=Adam(
             lr=adam_learning_rate,
             beta_1=adam_beta_1,
             beta_2=adam_beta_2,
-            decay=adam_decay
+            weight_decay=adam_decay
         ),
         loss=loss_function,
         metrics=[dice_coef]
