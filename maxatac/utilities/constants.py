@@ -8,29 +8,33 @@ LOG_LEVELS = {
     "error": ERROR,
     "warning": WARNING,
     "info": INFO,
-    "debug": DEBUG
+    "debug": DEBUG,
 }
 LOG_FORMAT = "[%(asctime)s]\n%(message)s"
-CPP_LOG_LEVEL = {
-    FATAL: 3,
-    ERROR: 3,
-    WARNING: 2,
-    INFO: 1,
-    DEBUG: 0
-}
+CPP_LOG_LEVEL = {FATAL: 3, ERROR: 3, WARNING: 2, INFO: 1, DEBUG: 0}
 
 # Paths to Genomic resource and scripts for preparing data. This is where most of the hardcoded paths are generated.
 # If the user runs maxatac data the data will be installed here. The default arguments for some commands rely on these paths.
 # The user can put the data anywhere, but they will need to adjust the paths for each file
-maxatac_data_path = os.path.join(os.path.expanduser('~'), "opt", "maxatac", "data")
+maxatac_data_path = os.path.join(os.path.expanduser("~"), "opt", "maxatac", "data")
 
 # build path names
-blacklist_path = os.path.join(maxatac_data_path, "hg38/hg38_maxatac_blacklist.bed") # maxATAC extended blacklist as bed
-blacklist_bigwig_path = os.path.join(maxatac_data_path, "hg38/hg38_maxatac_blacklist.bw") # maxATAC extended blacklist as bigwig
-chrom_sizes_path = os.path.join(maxatac_data_path, "hg38/hg38.chrom.sizes") # chrom sizes file
-sequence_path = os.path.join(maxatac_data_path, "hg38/hg38.2bit") # sequence 2bit
-prepare_atac_script_dir = os.path.join(maxatac_data_path, "scripts", "ATAC", "ATAC_bowtie2_pipeline.sh") # bulk processing script
-prepare_scatac_script_dir = os.path.join(maxatac_data_path, "scripts", "ATAC", "scatac_generate_bigwig.sh")  # scatac processing script
+blacklist_path = os.path.join(
+    maxatac_data_path, "hg38/hg38_maxatac_blacklist.bed"
+)  # maxATAC extended blacklist as bed
+blacklist_bigwig_path = os.path.join(
+    maxatac_data_path, "hg38/hg38_maxatac_blacklist.bw"
+)  # maxATAC extended blacklist as bigwig
+chrom_sizes_path = os.path.join(
+    maxatac_data_path, "hg38/hg38.chrom.sizes"
+)  # chrom sizes file
+sequence_path = os.path.join(maxatac_data_path, "hg38/hg38.2bit")  # sequence 2bit
+prepare_atac_script_dir = os.path.join(
+    maxatac_data_path, "scripts", "ATAC", "ATAC_bowtie2_pipeline.sh"
+)  # bulk processing script
+prepare_scatac_script_dir = os.path.join(
+    maxatac_data_path, "scripts", "ATAC", "scatac_generate_bigwig.sh"
+)  # scatac processing script
 
 # normalize paths
 DATA_PATH = os.path.normpath(maxatac_data_path)
@@ -42,30 +46,104 @@ PREPARE_BULK_SCRIPT = os.path.normpath(prepare_atac_script_dir)
 PREPARE_scATAC_SCRIPT = os.path.normpath(prepare_scatac_script_dir)
 
 # Default chromosome sets
-ALL_CHRS = ["chr1", "chr2", "chr3", "chr4", "chr5", "chr6",
-            "chr7", "chr8", "chr9", "chr10", "chr11", "chr12",
-            "chr13", "chr14", "chr15", "chr16", "chr17", "chr18",
-            "chr19", "chr20", "chr21", "chr22", "chrX", "chrY"
-            ]
+ALL_CHRS = [
+    "chr1",
+    "chr2",
+    "chr3",
+    "chr4",
+    "chr5",
+    "chr6",
+    "chr7",
+    "chr8",
+    "chr9",
+    "chr10",
+    "chr11",
+    "chr12",
+    "chr13",
+    "chr14",
+    "chr15",
+    "chr16",
+    "chr17",
+    "chr18",
+    "chr19",
+    "chr20",
+    "chr21",
+    "chr22",
+    "chrX",
+    "chrY",
+]
 
-AUTOSOMAL_CHRS = ["chr1", "chr2", "chr3", "chr4", "chr5", "chr6",
-                  "chr7", "chr8", "chr9", "chr10", "chr11", "chr12",
-                  "chr13", "chr14", "chr15", "chr16", "chr17", "chr18",
-                  "chr19", "chr20", "chr21", "chr22"
-                  ]
+AUTOSOMAL_CHRS = [
+    "chr1",
+    "chr2",
+    "chr3",
+    "chr4",
+    "chr5",
+    "chr6",
+    "chr7",
+    "chr8",
+    "chr9",
+    "chr10",
+    "chr11",
+    "chr12",
+    "chr13",
+    "chr14",
+    "chr15",
+    "chr16",
+    "chr17",
+    "chr18",
+    "chr19",
+    "chr20",
+    "chr21",
+    "chr22",
+]
 
 # Defualt chrs excludes 1,8
-DEFAULT_TRAIN_VALIDATE_CHRS = ["chr2", "chr3", "chr4", "chr5", "chr6",
-                               "chr7", "chr9", "chr10", "chr11", "chr12",
-                               "chr13", "chr14", "chr15", "chr16", "chr17", "chr18",
-                               "chr19", "chr20", "chr21", "chr22", "chrX"
-                               ]
+DEFAULT_TRAIN_VALIDATE_CHRS = [
+    "chr2",
+    "chr3",
+    "chr4",
+    "chr5",
+    "chr6",
+    "chr7",
+    "chr9",
+    "chr10",
+    "chr11",
+    "chr12",
+    "chr13",
+    "chr14",
+    "chr15",
+    "chr16",
+    "chr17",
+    "chr18",
+    "chr19",
+    "chr20",
+    "chr21",
+    "chr22",
+    "chrX",
+]
 
 # Default train chrs exclude 1,2,8,19,X,Y,M
-DEFAULT_TRAIN_CHRS = ["chr3", "chr4", "chr5", "chr6",
-                      "chr7", "chr9", "chr10", "chr11", "chr12",
-                      "chr13", "chr14", "chr15", "chr16", "chr17",
-                      "chr18", "chr20", "chr21", "chr22"]
+DEFAULT_TRAIN_CHRS = [
+    "chr3",
+    "chr4",
+    "chr5",
+    "chr6",
+    "chr7",
+    "chr9",
+    "chr10",
+    "chr11",
+    "chr12",
+    "chr13",
+    "chr14",
+    "chr15",
+    "chr16",
+    "chr17",
+    "chr18",
+    "chr20",
+    "chr21",
+    "chr22",
+]
 
 DEFAULT_VALIDATE_CHRS = ["chr2", "chr19"]
 
@@ -80,7 +158,7 @@ DEFAULT_TRAIN_BATCHES_PER_EPOCH = 100
 
 DEFAULT_ADAM_LEARNING_RATE = 0.001
 DEFAULT_ADAM_DECAY = 1e-5
-DEFAULT_VALIDATE_RAND_RATIO = .7
+DEFAULT_VALIDATE_RAND_RATIO = 0.7
 
 PRETRAINING_USE_CHIP_ROI = False
 
@@ -89,23 +167,72 @@ PRETRAINING_USE_CHIP_ROI = False
 INTER_FUSION = True
 CONV_TOWER_CONFIGS_FUSION = {
     "genome": [
-        {"num_layer": 1, "kernel": 10, "stride": 1, "padding": "same", "num_filters": 64, "activation": "relu"},
-        {"num_layer": 1, "kernel": 10, "stride": 1, "padding": "same", "num_filters": 64, "activation": "relu"}
+        {
+            "num_layer": 1,
+            "kernel": 10,
+            "stride": 1,
+            "padding": "same",
+            "num_filters": 64,
+            "activation": "relu",
+        },
+        {
+            "num_layer": 1,
+            "kernel": 10,
+            "stride": 1,
+            "padding": "same",
+            "num_filters": 64,
+            "activation": "relu",
+        },
     ],
     "atac": [
-        {"num_layer": 1, "kernel": 10, "stride": 1, "padding": "same", "num_filters": 64, "activation": "relu"},
-        {"num_layer": 1, "kernel": 10, "stride": 1, "padding": "same", "num_filters": 64, "activation": "relu"}
+        {
+            "num_layer": 1,
+            "kernel": 10,
+            "stride": 1,
+            "padding": "same",
+            "num_filters": 64,
+            "activation": "relu",
+        },
+        {
+            "num_layer": 1,
+            "kernel": 10,
+            "stride": 1,
+            "padding": "same",
+            "num_filters": 64,
+            "activation": "relu",
+        },
     ],
-    "merge": {"num_layer": 1, "kernel": 10, "stride": 1, "padding": "same", "num_filters": 64, "activation": "relu"}
+    "merge": {
+        "num_layer": 1,
+        "kernel": 10,
+        "stride": 1,
+        "padding": "same",
+        "num_filters": 64,
+        "activation": "relu",
+    },
 }
 ###################################################################################
 ################### CONFIGS FOR INTER FUSION CROSS ATTENTION ######################
 CONV_TOWER_CROSSATT_CONFIGS_FUSION = {
     "genome": [
-        {"num_layer": 2, "kernel": 10, "stride": 1, "padding": "same", "num_filters": 64, "activation": "relu"},
+        {
+            "num_layer": 2,
+            "kernel": 10,
+            "stride": 1,
+            "padding": "same",
+            "num_filters": 64,
+            "activation": "relu",
+        },
     ],
     "signal": [
-        {"num_layer": 2, "kernel": 10, "stride": 1, "padding": "same", "num_filters": 64, "activation": "relu"},
+        {
+            "num_layer": 2,
+            "kernel": 10,
+            "stride": 1,
+            "padding": "same",
+            "num_filters": 64,
+            "activation": "relu",
+        },
     ],
 }
 DOWNSAMPLE_METHOD_CONV_TOWER_CROSSATT = "None"
@@ -121,7 +248,7 @@ WHOLE_ATTENTION_KWARGS_SELFATT_GENOME = {
     "num_relative_position_features": None,  # channels // num_heads,
     "positional_dropout_rate": 0.01,
     "relative_position_symmetric": True,
-    "relative_position_functions": [ # leave these here although they are not used
+    "relative_position_functions": [  # leave these here although they are not used
         "positional_features_exponential",
         "positional_features_central_mask",
         "positional_features_gamma",
@@ -129,9 +256,9 @@ WHOLE_ATTENTION_KWARGS_SELFATT_GENOME = {
         #'positional_features_linear_masks',
         #'positional_features_sin_cos',
     ],
-    "relative_positions": True,  
+    "relative_positions": True,
     "scaling": True,
-    "initializer": "GlorotNormal", # better to define the initializer here
+    "initializer": "GlorotNormal",  # better to define the initializer here
     "zero_initialize": True,
 }
 NUM_HEADS_CROSSATT = 4
@@ -153,9 +280,9 @@ WHOLE_ATTENTION_KWARGS_CROSSATT_SIGNAL = {
         #'positional_features_linear_masks',
         #'positional_features_sin_cos',
     ],
-    "relative_positions": True,  
+    "relative_positions": True,
     "scaling": True,
-    "initializer": "GlorotNormal", # better to define the initializer here
+    "initializer": "GlorotNormal",  # better to define the initializer here
     "zero_initialize": True,
 }
 
@@ -163,27 +290,82 @@ WHOLE_ATTENTION_KWARGS_CROSSATT_SIGNAL = {
 
 # Constants for the conv tower before MHA (key is number of conv layers, value is number of filters)
 CONV_TOWER_CONFIGS = [
-    {"num_layer": 2, "kernel": 10, "stride": 1, "padding": "same", "num_filters": 64, "activation": "relu"}
+    {
+        "num_layer": 2,
+        "kernel": 10,
+        "stride": 1,
+        "padding": "same",
+        "num_filters": 64,
+        "activation": "relu",
+    }
 ]
 DOWNSAMPLE_METHOD_CONV_TOWER = "conv"
 
 # Constants for the Inception module (nearly all branches have a 1x1 conv block first)
 INCEPTION_BRANCHES = [
     [
-        {"name": "conv", "num_layer": 1, "kernel": 1, "stride": 1, "padding": "same", "num_filters": 16, "activation": "relu"},
-        {"name": "conv", "num_layer": 2, "kernel": 10, "stride": 1, "padding": "same", "num_filters": 16, "activation": "relu"}
+        {
+            "name": "conv",
+            "num_layer": 1,
+            "kernel": 1,
+            "stride": 1,
+            "padding": "same",
+            "num_filters": 16,
+            "activation": "relu",
+        },
+        {
+            "name": "conv",
+            "num_layer": 2,
+            "kernel": 10,
+            "stride": 1,
+            "padding": "same",
+            "num_filters": 16,
+            "activation": "relu",
+        },
     ],
     [
-        {"name": "conv", "num_layer": 1, "kernel": 1, "stride": 1, "padding": "same", "num_filters": 16, "activation": "relu"},
-        {"name": "conv", "num_layer": 1, "kernel": 13, "stride": 1, "padding": "same", "num_filters": 16, "activation": "relu"}
+        {
+            "name": "conv",
+            "num_layer": 1,
+            "kernel": 1,
+            "stride": 1,
+            "padding": "same",
+            "num_filters": 16,
+            "activation": "relu",
+        },
+        {
+            "name": "conv",
+            "num_layer": 1,
+            "kernel": 13,
+            "stride": 1,
+            "padding": "same",
+            "num_filters": 16,
+            "activation": "relu",
+        },
     ],
     [
         {"name": "pool", "pool_size": 13, "stride": 1, "padding": "same"},
-        {"name": "conv", "num_layer": 1, "kernel": 1, "stride": 1, "padding": "same", "num_filters": 16, "activation": "relu"}
+        {
+            "name": "conv",
+            "num_layer": 1,
+            "kernel": 1,
+            "stride": 1,
+            "padding": "same",
+            "num_filters": 16,
+            "activation": "relu",
+        },
     ],
     [
-        {"name": "conv", "num_layer": 1, "kernel": 1, "stride": 1, "padding": "same", "num_filters": 16, "activation": "relu"}
-    ]
+        {
+            "name": "conv",
+            "num_layer": 1,
+            "kernel": 1,
+            "stride": 1,
+            "padding": "same",
+            "num_filters": 16,
+            "activation": "relu",
+        }
+    ],
 ]
 
 # Constants for self-attention (embedding size must be equal num_heads * key_dims, and must also be equal
@@ -209,7 +391,7 @@ WHOLE_ATTENTION_KWARGS = {
     "num_relative_position_features": None,  # channels // num_heads,
     "positional_dropout_rate": 0.01,
     "relative_position_symmetric": True,
-    "relative_position_functions": [ # leave these here although they are not used
+    "relative_position_functions": [  # leave these here although they are not used
         "positional_features_exponential",
         "positional_features_central_mask",
         "positional_features_gamma",
@@ -217,16 +399,16 @@ WHOLE_ATTENTION_KWARGS = {
         #'positional_features_linear_masks',
         #'positional_features_sin_cos',
     ],
-    "relative_positions": True,  
+    "relative_positions": True,
     "scaling": True,
-    "initializer": "GlorotNormal", # better to define the initializer here
+    "initializer": "GlorotNormal",  # better to define the initializer here
     "zero_initialize": True,
 }
 
 # Can be changed without problems
 BATCH_SIZE = 100
 VAL_BATCH_SIZE = 100
-BP_DICT = {"A":0, "C":1, "G":2, "T":3}
+BP_DICT = {"A": 0, "C": 1, "G": 2, "T": 3}
 CHR_POOL_SIZE = 1000
 BP_ORDER = ["A", "C", "G", "T"]
 INPUT_FILTERS = 16
@@ -262,7 +444,10 @@ OUTPUT_ACTIVATION = "sigmoid"
 
 # Benchmarking Constants
 DEFAULT_BENCHMARKING_AGGREGATION_FUNCTION = "max"
-DEFAULT_BENCHMARKING_BIN_SIZE = 32
+DEFAULT_BENCHMARKING_BIN_SIZE = 200
 
 INPUT_CHANNELS = 5
 TRAIN_MONITOR = "val_loss"
+
+PREDICTION_HEAD_DROPOUT_RATE = 0.05
+RESIDUAL_CONNECTION_DROPOUT_RATE = 0.05

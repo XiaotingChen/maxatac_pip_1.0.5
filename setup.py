@@ -81,6 +81,7 @@ setup(
     ),
     install_requires=[
         "tensorflow",
+        "tensorflow_addons",
         "tensorboard",
         "biopython",
         "py2bit",
