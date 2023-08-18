@@ -19,11 +19,13 @@ with Mute():
     from maxatac.utilities.callbacks import get_callbacks
     from maxatac.utilities.training_tools import (
         DataGenerator,
+        DataGenerator_v2,
         MaxATACModel,
         ROIPool,
         SeqDataGenerator,
         model_selection,
         save_metadata,
+        CHIP_sample_weight_adjustment,
     )
     from maxatac.utilities.plot import (
         export_binary_metrics,
@@ -64,21 +66,14 @@ def run_training(args):
     """
     logging.error(args)
 
-    # Check if tf is using GPU
-    print(
-        f"Number of GPU used: {len(tensorflow.config.list_physical_devices('GPU')) > 0}"
-    )
-    gpus = tensorflow.config.list_physical_devices("GPU")
+    gpus = tensorflow.config.list_physical_devices('GPU')
     if gpus:
         try:
-            print(gpus)
             # Currently, memory growth needs to be the same across GPUs
-            # for gpu in gpus:
-            #    tensorflow.config.experimental.set_memory_growth(gpu, True)
-            logical_gpus = tensorflow.config.list_logical_devices("GPU")
-            logging.error(
-                f"{len(gpus)} Physical GPUs, {len(logical_gpus)}, Logical GPUs"
-            )
+            for gpu in gpus:
+                tensorflow.config.experimental.set_memory_growth(gpu, True)
+            logical_gpus = tensorflow.config.list_logical_devices('GPU')
+            print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
         except RuntimeError as e:
             # Memory growth must be set before GPUs have been initialized
             print(e)
@@ -99,12 +94,27 @@ def run_training(args):
 
     # override model config from maxatac args
     model_config["OPTIMIZER"] = args.optimizer
+
     model_config["USING_BASENJI_KERNEL"] = args.USING_BASENJI_KERNEL
     model_config["USING_ENFORMER_KERNEL"] = args.USING_ENFORMER_KERNEL
     model_config["BASENJI_KERNEL_TRAINABLE"] = args.BASENJI_KERNEL_TRAINABLE
     model_config["ENFORMER_KERNEL_TRAINABLE"] = args.ENFORMER_KERNEL_TRAINABLE
     model_config["KERNEL_REPLACING"] = args.KERNEL_REPLACING
-    model_config["SUPPRESS_DROPOUT"]= args.SUPPRESS_DROPOUT
+
+    model_config["SUPPRESS_DROPOUT"] = args.SUPPRESS_DROPOUT
+    model_config["RESIDUAL_CONNECTION_DROPOUT_RATE"] = args.RESIDUAL_CONNECTION_DROPOUT_RATE
+    model_config["PREDICTION_HEAD_DROPOUT_RATE"] = args.PREDICTION_HEAD_DROPOUT_RATE
+
+    model_config["COSINEDECAYRESTARTS"] = args.COSINEDECAYRESTARTS
+    model_config["COSINEDECAYRESTARTS_FIRST_DECAY_STEPS"] = args.COSINEDECAYRESTARTS_FIRST_DECAY_STEPS
+
+    model_config["FOCAL_LOSS_ALPHA"] = args.FOCAL_LOSS_ALPHA
+    model_config["FOCAL_LOSS_GAMMA"] = args.FOCAL_LOSS_GAMMA
+    model_config["FOCAL_LOSS"] = args.FOCAL_LOSS
+    model_config["FOCAL_LOSS_APPLY_ALPHA"] = args.FOCAL_LOSS_APPLY_ALPHA
+
+    model_config["INITIAL_LEARNING_RATE"] = args.INITIAL_LEARNING_RATE
+
 
     # Initialize the model with the architecture of choice
     maxatac_model = MaxATACModel(
@@ -121,8 +131,7 @@ def run_training(args):
         inter_fusion=model_config["INTER_FUSION"],
     )
 
-    # Save metadata
-    save_metadata(args.output, args, model_config)
+    # export model structure
     export_model_structure(
         maxatac_model.nn_model, maxatac_model.results_location, ext=".pdf"
     )
@@ -130,32 +139,6 @@ def run_training(args):
     ## Save the args and the constants to the output folder
     # with open(os.path.join(args.output, "user_args.txt"), "w") as f:
     #    json.dump(args.__dict__, f, indent=2)
-
-    # This is only for this project, so please change this line of code
-    # shutil.copyfile(
-    #     "/users/ngun7t/anaconda3/envs/maxatac/lib/python3.9/site-packages/maxatac/utilities/constants.py",
-    #     os.path.join(args.output, "constants.py")
-    # )
-    # shutil.copyfile(
-    #     "/users/ngun7t/anaconda3/envs/maxatac/lib/python3.9/site-packages/maxatac/architectures/attention_module_TF.py",
-    #     os.path.join(args.output, "attention_module_TF.py")
-    # )
-    # if model_config["INTER_FUSION"]:
-    #     if args.arch == "Crossatt_transformer":
-    #         shutil.copyfile(
-    #             "/users/ngun7t/anaconda3/envs/maxatac/lib/python3.9/site-packages/maxatac/architectures/multiinput_transformers.py",
-    #             os.path.join(args.output, "multiinput_crossatt_transformers.py")
-    #         )
-    #     else:
-    #         shutil.copyfile(
-    #             "/users/ngun7t/anaconda3/envs/maxatac/lib/python3.9/site-packages/maxatac/architectures/multiinput_transformers.py",
-    #             os.path.join(args.output, "multiinput_transformers.py")
-    #         )
-    # else:
-    #     shutil.copyfile(
-    #         "/users/ngun7t/anaconda3/envs/maxatac/lib/python3.9/site-packages/maxatac/architectures/transformers.py",
-    #         os.path.join(args.output, "transformers.py")
-    #     )
 
     logging.error("Import training regions")
 
@@ -183,30 +166,93 @@ def run_training(args):
         tag="validation",
     )
 
+    if args.ATAC_Sampling_Multiplier != 0:
+        steps_per_epoch_v2 = int(
+            train_examples.ROI_pool_unique_region_size_CHIP
+            // np.ceil((args.batch_size / (1 + args.ATAC_Sampling_Multiplier)))
+        )
+        validation_steps_v2 = int(
+            validate_examples.ROI_pool_unique_region_size_CHIP
+            // np.ceil((args.batch_size / (1 + args.ATAC_Sampling_Multiplier)))
+        )  # under a fixed ratio of 5, we are probably just under-sample to 1/3 of the total background
+
+        # Save metadata
+        save_metadata(
+            args.output,
+            args,
+            model_config,
+            extra={
+                "training CHIP ROI total regions": train_examples.ROI_pool_CHIP.shape[
+                    0
+                ],
+                "training ATAC ROI total regions": train_examples.ROI_pool_ATAC.shape[
+                    0
+                ],
+                "validate CHIP ROI total regions": validate_examples.ROI_pool_CHIP.shape[
+                    0
+                ],
+                "validate ATAC ROI total regions": validate_examples.ROI_pool_ATAC.shape[
+                    0
+                ],
+                "training CHIP ROI unique regions": train_examples.ROI_pool_unique_region_size_CHIP,
+                "training ATAC ROI unique regions": train_examples.ROI_pool_unique_region_size_ATAC,
+                "validate CHIP ROI unique regions": validate_examples.ROI_pool_unique_region_size_CHIP,
+                "validate ATAC ROI unique regions": validate_examples.ROI_pool_unique_region_size_ATAC,
+                "batch size": args.batch_size,
+                "training batches per epoch": steps_per_epoch_v2,
+                "validation batches per epoch": validation_steps_v2,
+                "total epochs": args.epochs,
+                "ATAC_Sampling_Multiplier": args.ATAC_Sampling_Multiplier,
+                "CHIP_Sample_Weight_Baseline": args.CHIP_Sample_Weight_Baseline,
+            },
+        )
+
+        # annotate CHIP ROI with additional sample weight adjustment
+        train_examples.ROI_pool_CHIP = CHIP_sample_weight_adjustment(
+            train_examples.ROI_pool_CHIP
+        )
+        validate_examples.ROI_pool_CHIP = CHIP_sample_weight_adjustment(
+            validate_examples.ROI_pool_CHIP
+        )
+
     logging.error("Initialize data generator")
 
     # The function returns a generator that each next() yields an input_batch and a target_batch, which in ML language might be features X and labels y
     # There's the rand_ratio that defines the ratio at which the random genome regions and the ROI regions are taken
 
     # Initialize the training generator
-    train_gen = DataGenerator(
-        sequence=args.sequence,
-        meta_table=maxatac_model.meta_dataframe,
-        roi_pool=train_examples.ROI_pool,
-        cell_type_list=maxatac_model.cell_types,
-        rand_ratio=args.rand_ratio,
-        chroms=args.tchroms,
-        batch_size=args.batch_size,
-        shuffle_cell_type=args.shuffle_cell_type,
-        rev_comp_train=args.rev_comp,
-        inter_fusion=model_config["INTER_FUSION"],
-    )
-
-    # (beta) load a batch of images using train_gen, take one sample as the data sample
-    input_batch, _ = next(iter(train_gen))
+    if args.ATAC_Sampling_Multiplier == 0:
+        train_gen = DataGenerator(
+            sequence=args.sequence,
+            meta_table=maxatac_model.meta_dataframe,
+            roi_pool=train_examples.ROI_pool,
+            cell_type_list=maxatac_model.cell_types,
+            rand_ratio=args.rand_ratio,
+            chroms=args.tchroms,
+            batch_size=args.batch_size,
+            shuffle_cell_type=args.shuffle_cell_type,
+            rev_comp_train=args.rev_comp,
+            inter_fusion=model_config["INTER_FUSION"],
+        )
+    else:
+        train_gen = DataGenerator_v2(
+            sequence=args.sequence,
+            meta_table=maxatac_model.meta_dataframe,
+            roi_pool_atac=train_examples.ROI_pool_ATAC,
+            roi_pool_chip=train_examples.ROI_pool_CHIP,
+            cell_type_list=maxatac_model.cell_types,
+            rand_ratio=args.rand_ratio,
+            chroms=args.tchroms,
+            batch_size=args.batch_size,
+            shuffle_cell_type=args.shuffle_cell_type,
+            rev_comp_train=args.rev_comp,
+            inter_fusion=model_config["INTER_FUSION"],
+            atac_sampling_multiplier=args.ATAC_Sampling_Multiplier,
+            chip_sample_weight_baseline=args.CHIP_Sample_Weight_Baseline,
+        )
 
     # Create keras.utils.sequence object from training generator
-    seq_train_gen = SeqDataGenerator(batches=args.batches, generator=train_gen)
+    seq_train_gen = SeqDataGenerator(batches=args.batch_size, generator=train_gen)
 
     # Specify max_que_size
     if args.max_queue_size:
@@ -233,54 +279,91 @@ def run_training(args):
     )  # enq_train_gen is now a generator to extract data from the queue
 
     # Initialize the validation generator
-    val_gen = DataGenerator(
-        sequence=args.sequence,
-        meta_table=maxatac_model.meta_dataframe,
-        roi_pool=validate_examples.ROI_pool,
-        cell_type_list=maxatac_model.cell_types,
-        rand_ratio=args.rand_ratio,
-        chroms=args.vchroms,
-        batch_size=args.batch_size,
-        shuffle_cell_type=args.shuffle_cell_type,
-        rev_comp_train=args.rev_comp,
-        inter_fusion=model_config["INTER_FUSION"],
-    )
+    if args.ATAC_Sampling_Multiplier == 0:
+        val_gen = DataGenerator(
+            sequence=args.sequence,
+            meta_table=maxatac_model.meta_dataframe,
+            roi_pool=validate_examples.ROI_pool,
+            cell_type_list=maxatac_model.cell_types,
+            rand_ratio=args.rand_ratio,
+            chroms=args.vchroms,
+            batch_size=args.batch_size,
+            shuffle_cell_type=args.shuffle_cell_type,
+            rev_comp_train=args.rev_comp,
+            inter_fusion=model_config["INTER_FUSION"],
+        )
+    else:
+        val_gen = DataGenerator_v2(
+            sequence=args.sequence,
+            meta_table=maxatac_model.meta_dataframe,
+            roi_pool_atac=validate_examples.ROI_pool_ATAC,
+            roi_pool_chip=validate_examples.ROI_pool_CHIP,
+            cell_type_list=maxatac_model.cell_types,
+            rand_ratio=args.rand_ratio,
+            chroms=args.vchroms,
+            batch_size=args.batch_size,
+            shuffle_cell_type=False,
+            rev_comp_train=args.rev_comp,
+            inter_fusion=model_config["INTER_FUSION"],
+            atac_sampling_multiplier=args.ATAC_Sampling_Multiplier,
+            chip_sample_weight_baseline=args.CHIP_Sample_Weight_Baseline,
+        )
 
     # Create keras.utils.sequence object from validation generator
-    seq_validate_gen = SeqDataGenerator(batches=args.batches, generator=val_gen)
+    seq_validate_gen = SeqDataGenerator(batches=args.batch_size, generator=val_gen)
 
     # Builds a Enqueuer from a Sequence.
     # Specify multiprocessing
     if args.multiprocessing:
-        logging.info("Training with multiprocessing")
+        logging.info("Validating with multiprocessing")
         val_gen_enq = OrderedEnqueuer(seq_validate_gen, use_multiprocessing=True)
         val_gen_enq.start(workers=args.threads, max_queue_size=queue_size)
     else:
-        logging.info("Training without multiprocessing")
+        logging.info("Validating without multiprocessing")
         val_gen_enq = OrderedEnqueuer(seq_validate_gen, use_multiprocessing=False)
         val_gen_enq.start(workers=1, max_queue_size=queue_size)
     enq_val_gen = val_gen_enq.get()
 
     # Fit the model
     logging.error("Start training the model")
-    training_history = maxatac_model.nn_model.fit(
-        enq_train_gen,  # model.fit() accepts a generator or Sequence that returns (inputs, targets). From the doc, when x is a generator, y should not be specified
-        validation_data=enq_val_gen,
-        steps_per_epoch=args.batches,
-        validation_steps=args.batches,
-        epochs=args.epochs,
-        callbacks=get_callbacks(
-            model_location=maxatac_model.results_location,
-            log_location=maxatac_model.log_location,
-            tensor_board_log_dir=maxatac_model.tensor_board_log_dir,
-            monitor=TRAIN_MONITOR,
-            reduce_lr_on_plateau=args.reduce_lr_on_plateau,
-        ),
-        max_queue_size=10,
-        use_multiprocessing=False,
-        workers=1,
-        verbose=1,
-    )
+    if args.ATAC_Sampling_Multiplier == 0:
+        training_history = maxatac_model.nn_model.fit(
+            enq_train_gen,
+            # model.fit() accepts a generator or Sequence that returns (inputs, targets). From the doc, when x is a generator, y should not be specified
+            validation_data=enq_val_gen,
+            steps_per_epoch=args.batches,
+            validation_steps=args.batches,
+            epochs=args.epochs,
+            callbacks=get_callbacks(
+                model_location=maxatac_model.results_location,
+                log_location=maxatac_model.log_location,
+                tensor_board_log_dir=maxatac_model.tensor_board_log_dir,
+                monitor=TRAIN_MONITOR,
+            ),
+            max_queue_size=10,
+            use_multiprocessing=False,
+            workers=1,
+            verbose=1,
+        )
+    else:
+        training_history = maxatac_model.nn_model.fit(
+            enq_train_gen,  # model.fit() accepts a generator or Sequence that returns (inputs, targets). From the doc, when x is a generator, y should not be specified
+            validation_data=enq_val_gen,
+            steps_per_epoch=steps_per_epoch_v2,
+            validation_steps=validation_steps_v2,
+            epochs=args.epochs,
+            callbacks=get_callbacks(
+                model_location=maxatac_model.results_location,
+                log_location=maxatac_model.log_location,
+                tensor_board_log_dir=maxatac_model.tensor_board_log_dir,
+                monitor=TRAIN_MONITOR,
+                reduce_lr_on_plateau=args.reduce_lr_on_plateau,
+            ),
+            max_queue_size=10,
+            use_multiprocessing=False,
+            workers=1,
+            verbose=1,
+        )
 
     logging.error("Plot and save results")
 

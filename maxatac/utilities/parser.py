@@ -777,6 +777,7 @@ def get_parser():
         choices=["Adam", "AdamW", "Lion"],
         help="Optimizer to use in training.",
     )
+
     train_parser.add_argument(
         "--reduce_lr_on_plateau",
         dest="reduce_lr_on_plateau",
@@ -786,12 +787,30 @@ def get_parser():
     )
 
     train_parser.add_argument(
+        "--COSINEDECAYRESTARTS",
+        dest="COSINEDECAYRESTARTS",
+        action="store_true",
+        default=False,
+        help="Whether enables COSINEDECAYRESTARTS scheduler during training.",
+    )
+
+    train_parser.add_argument(
+        "--COSINEDECAYRESTARTS_FIRST_DECAY_STEPS",
+        dest="COSINEDECAYRESTARTS_FIRST_DECAY_STEPS",
+        type=int,
+        action="store",
+        default=1000,
+        help="Adjust parameter COSINEDECAYRESTARTS_FIRST_DECAY_STEPS.",
+    )
+
+    train_parser.add_argument(
         "--USING_BASENJI_KERNEL",
         dest="USING_BASENJI_KERNEL",
         action="store_true",
         default=False,
         help="Whether to use BASENJI kernel in the 1st layer.",
     )
+
     train_parser.add_argument(
         "--USING_ENFORMER_KERNEL",
         dest="USING_ENFORMER_KERNEL",
@@ -799,6 +818,7 @@ def get_parser():
         default=False,
         help="Whether to use ENFORMER kernel in the 1st layer.",
     )
+
     train_parser.add_argument(
         "--BASENJI_KERNEL_TRAINABLE",
         dest="BASENJI_KERNEL_TRAINABLE",
@@ -806,6 +826,7 @@ def get_parser():
         default=False,
         help="Whether enables BASENJI kernel to learn.",
     )
+
     train_parser.add_argument(
         "--ENFORMER_KERNEL_TRAINABLE",
         dest="ENFORMER_KERNEL_TRAINABLE",
@@ -813,13 +834,15 @@ def get_parser():
         default=False,
         help="Whether enables ENFORMER kernel to learn.",
     )
+
     train_parser.add_argument(
         "--KERNEL_REPLACING",
         dest="KERNEL_REPLACING",
         action="store_true",
         default=False,
-        help="Whether replaces the original kernel or work as a not trainable side branch.",
+        help="Whether replaces the original kernel or work as an non-trainable side branch.",
     )
+
     train_parser.add_argument(
         "--SUPPRESS_DROPOUT",
         dest="SUPPRESS_DROPOUT",
@@ -827,6 +850,86 @@ def get_parser():
         action="store_true",
         help="Whether to suppress dropout in non-transformer layers.",
     )
+
+    train_parser.add_argument(
+        "--FOCAL_LOSS",
+        dest="FOCAL_LOSS",
+        default=False,
+        action="store_true",
+        help="Whether to use binary focal cross entropy as loss function.",
+    )
+
+    train_parser.add_argument(
+        "--FOCAL_LOSS_ALPHA",
+        dest="FOCAL_LOSS_ALPHA",
+        type=float,
+        default=0.25,
+        action="store",
+        help="Set alpha value in binary focal cross entropy as loss function.",
+    )
+
+    train_parser.add_argument(
+        "--FOCAL_LOSS_GAMMA",
+        dest="FOCAL_LOSS_GAMMA",
+        type=float,
+        default=2,
+        action="store",
+        help="Set gamma value in binary focal cross entropy as loss function.",
+    )
+
+    train_parser.add_argument(
+        "--FOCAL_LOSS_APPLY_ALPHA",
+        dest="FOCAL_LOSS_APPLY_ALPHA",
+        default=False,
+        action="store_true",
+        help="Whether to use alpha in binary focal cross entropy as loss function.",
+    )
+
+    train_parser.add_argument(
+        "--ATAC_Sampling_Multiplier",
+        dest="ATAC_Sampling_Multiplier",
+        type=int,
+        action="store",
+        default=0,
+        help="This sets the number of ATAC samples matched to each ChIP sample during training, disable by setting to 0.",
+    )
+
+    train_parser.add_argument(
+        "--CHIP_Sample_Weight_Baseline",
+        dest="CHIP_Sample_Weight_Baseline",
+        type=int,
+        action="store",
+        default=5,
+        help="This sets the baseline sample weight for ChIP-seq peaks.",
+    )
+
+    train_parser.add_argument(
+        "--INITIAL_LEARNING_RATE",
+        dest="INITIAL_LEARNING_RATE",
+        type=float,
+        action="store",
+        default=1e-3,
+        help="Set INITIAL_LEARNING_RATE.",
+    )
+
+    train_parser.add_argument(
+        "--PREDICTION_HEAD_DROPOUT_RATE",
+        dest="PREDICTION_HEAD_DROPOUT_RATE",
+        type=float,
+        action="store",
+        default=0.05,
+        help="Set PREDICTION_HEAD_DROPOUT_RATE.",
+    )
+
+    train_parser.add_argument(
+        "--RESIDUAL_CONNECTION_DROPOUT_RATE",
+        dest="RESIDUAL_CONNECTION_DROPOUT_RATE",
+        type=float,
+        action="store",
+        default=0.05,
+        help="Set RESIDUAL_CONNECTION_DROPOUT_RATE.",
+    )
+
     #############################################
     # Pretrain parser
     #############################################

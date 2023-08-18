@@ -4,6 +4,7 @@ from maxatac.utilities.system_tools import Mute
 
 
 with Mute():
+    import numpy as np
     import tensorflow as tf
     from tensorflow.keras import backend as K
     from tensorflow.keras.callbacks import ModelCheckpoint
@@ -58,6 +59,43 @@ def loss_function(
         mask=K.greater_equal(y_true, y_true_min),
     )
     return tf.reduce_mean(input_tensor=losses)
+
+class loss_function_focal_class(tf.keras.losses.Loss):
+
+    def __init__(self,name='focal_loss',reduction=tf.keras.losses.Reduction.AUTO,alpha=0.25,gamma=2.0,apply_class_balancing=False):
+        super(loss_function_focal_class,self).__init__(name=name,reduction=reduction)
+        self.alpha=alpha
+        self.gamma=gamma
+        self.apply_class_balancing=apply_class_balancing
+        self.y_pred_min = 0.0000001,  # 1e-7
+        self.y_pred_max = 0.9999999,  # 1 - 1e-7
+        self.y_true_min = -0.5,
+
+    def call(self, y_true, y_pred):
+        _shape = tf.shape(y_true)[0]
+        y_true = K.flatten(y_true)
+        y_pred = tf.clip_by_value(K.flatten(y_pred), self.y_pred_min, self.y_pred_max)
+
+        _batch_size=y_true.shape[0]
+        _alpha_weight=np.ones(_batch_size)*self.alpha*y_true + np.ones(_batch_size)*(1-self.alpha)*(np.ones(_batch_size)-y_true)
+
+        if self.apply_class_balancing:
+            losses = tf.boolean_mask(
+                tensor=-y_true * K.log(y_pred) * K.pow(1-y_pred, self.gamma) * _alpha_weight - (1 - y_true) * K.log(1 - y_pred) * K.pow(y_pred, self.gamma) * _alpha_weight,
+                mask=K.greater_equal(y_true, self.y_true_min),
+            )
+        else:
+            losses = tf.boolean_mask(
+                tensor=-y_true * K.log(y_pred) * K.pow(1 - y_pred, self.gamma) - (1 - y_true) * K.log(1 - y_pred) * K.pow(y_pred, self.gamma),
+                mask=K.greater_equal(y_true, self.y_true_min),
+            )
+        losses = tf.cast(losses,tf.float32)
+        losses = tf.reshape(losses, (_shape, -1))
+        return tf.reduce_mean(input_tensor=losses,axis=-1)
+
+    def get_config(self):
+        """Returns the config dictionary for a `Loss` instance."""
+        return {"reduction": self.reduction, "name": self.name}
 
 
 def pearson(y_true, y_pred):
@@ -234,6 +272,7 @@ def get_layer(
     use_bias=True,
     name=None,
     pre_activation=False,
+    focal_initializing=False,
 ):
     """
     Returns new layer without max pooling. If concat_layer,
@@ -257,16 +296,29 @@ def get_layer(
             )(inbound_layer)
             inbound_layer = BatchNormalization()(inbound_layer)
         else:
-            inbound_layer = Conv1D(
-                filters=filters,
-                kernel_size=kernel_size,
-                activation=activation,
-                padding=padding,
-                dilation_rate=dilation_rate,
-                kernel_initializer=kernel_initializer,
-                use_bias=use_bias,
-                name=name,
-            )(inbound_layer)
+            if focal_initializing == False:
+                inbound_layer = Conv1D(
+                    filters=filters,
+                    kernel_size=kernel_size,
+                    activation=activation,
+                    padding=padding,
+                    dilation_rate=dilation_rate,
+                    kernel_initializer=kernel_initializer,
+                    use_bias=use_bias,
+                    name=name,
+                )(inbound_layer)
+            else:
+                inbound_layer = Conv1D(
+                    filters=filters,
+                    kernel_size=kernel_size,
+                    activation=activation,
+                    padding=padding,
+                    dilation_rate=dilation_rate,
+                    kernel_initializer=kernel_initializer,
+                    use_bias=True,
+                    bias_initializer=tf.keras.initializers.Constant(-2), #
+                    name=name,
+                )(inbound_layer)
             if not skip_batch_norm:
                 inbound_layer = BatchNormalization()(inbound_layer)
     return inbound_layer

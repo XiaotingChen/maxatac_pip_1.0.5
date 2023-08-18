@@ -14,7 +14,7 @@ import glob
 import json
 import ntpath
 import shutil
-
+import copy
 from maxatac.utilities import constants
 from maxatac.architectures.dcnn import get_dilated_cnn, get_dilated_cnn_with_attention
 from maxatac.architectures.transformers import get_transformer
@@ -300,6 +300,129 @@ def DataGenerator(
             yield {"genome": genome_batch, "atac": atac_batch}, targets_batch
 
 
+def DataGenerator_v2(
+    sequence,
+    meta_table,
+    roi_pool_atac,
+    roi_pool_chip,
+    cell_type_list,
+    rand_ratio,
+    chroms,
+    bp_resolution=BP_RESOLUTION,
+    target_scale_factor=1,
+    batch_size=BATCH_SIZE,
+    shuffle_cell_type=False,
+    rev_comp_train=False,
+    inter_fusion=False,
+    atac_sampling_multiplier=5,
+    chip_sample_weight_baseline=5,
+):
+    """
+    Initiate a data generator that will yield a batch of examples for training. This generator will mix samples from a
+    pool of random regions and a pool of regions of interest based on the user defined ratio. The examples will be
+    returned as a list of numpy arrays.
+
+    _________________
+    Workflow Overview
+
+    1) Create the random regions pool
+    2) Create the roi generator
+    3) Create the random regions generator
+    4) Combine the roi  and random regions batches according to the rand_ratio value
+
+    :param sequence: The input 2bit DNA sequence
+    :param meta_table: The run meta table with locations to ATAC and ChIP-seq data
+    :param roi_pool: The pool of regions to use centered on peaks
+    :param cell_type_list: The training cell lines to use
+    :param rand_ratio: The number of random examples to use per batch
+    :param chroms: The training chromosomes
+    :param bp_resolution: The resolution of the predictions to use
+    :param batch_size: The number of examples to use per batch of training
+    :param shuffle_cell_type: Shuffle the ROI cell type labels if True
+    :param rev_comp_train: use the reverse complement to train
+
+    :return A generator that will yield a batch with number of examples equal to batch size
+
+    """
+    # Calculate the number of ROIs to use based on the total batch size and proportion of random regions to use
+    n_roi = round(batch_size * (1.0 - rand_ratio))
+
+    # Calculate number of random regions to use each batch
+    n_rand = round(batch_size - n_roi)
+
+    if n_rand > 0:
+        # Generate the training random regions pool
+        train_random_regions_pool = RandomRegionsPool(
+            chroms=build_chrom_sizes_dict(chroms, DEFAULT_CHROM_SIZES),
+            chrom_pool_size=CHR_POOL_SIZE,
+            region_length=INPUT_LENGTH,
+            preferences=False,  # can be None
+        )
+
+        # Initialize the random regions generator
+        rand_gen = create_random_batch_v2(
+            sequence=sequence,
+            meta_table=meta_table,
+            cell_type_list=cell_type_list,
+            n_rand=n_rand,
+            regions_pool=train_random_regions_pool,
+            bp_resolution=bp_resolution,
+            target_scale_factor=target_scale_factor,
+            rev_comp_train=rev_comp_train,
+        )
+
+    # Initialize the ROI generator
+    roi_gen = create_roi_batch_v2(
+        sequence=sequence,
+        meta_table=meta_table,
+        roi_pool_atac=roi_pool_atac,
+        roi_pool_chip=roi_pool_chip,
+        n_roi=n_roi,
+        cell_type_list=cell_type_list,
+        bp_resolution=bp_resolution,
+        target_scale_factor=target_scale_factor,
+        shuffle_cell_type=shuffle_cell_type,
+        rev_comp_train=rev_comp_train,
+        atac_sampling_multiplier=atac_sampling_multiplier,
+        chip_sample_weight_baseline=chip_sample_weight_baseline,
+    )
+
+    while True:
+        # roi_batch.shape = (n_samples, 1024, 6)
+        if 0.0 < rand_ratio < 1.0:
+            roi_input_batch, roi_target_batch, roi_weight_batch = next(roi_gen)
+            rand_input_batch, rand_target_batch, rand_weight_batch = next(rand_gen)
+            inputs_batch = np.concatenate((roi_input_batch, rand_input_batch), axis=0)
+            targets_batch = np.concatenate(
+                (roi_target_batch, rand_target_batch), axis=0
+            )
+            weights_batch = np.concatenate(
+                (roi_weight_batch, rand_weight_batch), axis=0
+            )
+
+        elif rand_ratio == 1.0:
+            rand_input_batch, rand_target_batch, rand_weight_batch = next(rand_gen)
+            inputs_batch = rand_input_batch
+            targets_batch = rand_target_batch
+            weights_batch = rand_weight_batch
+        else:
+            roi_input_batch, roi_target_batch, roi_weight_batch = next(roi_gen)
+            inputs_batch = roi_input_batch
+            targets_batch = roi_target_batch
+            weights_batch = roi_weight_batch
+
+        if not inter_fusion:
+            yield inputs_batch, targets_batch, weights_batch
+        else:
+            # Split the inputs_batch to the genome track and the atacseq track
+            genome_batch = inputs_batch[..., :4]
+            atac_batch = np.expand_dims(inputs_batch[..., 4], axis=-1)
+            yield {
+                "genome": genome_batch,
+                "atac": atac_batch,
+            }, targets_batch, weights_batch
+
+
 def get_input_matrix(
     signal_stream,
     sequence_stream,
@@ -386,6 +509,8 @@ def create_roi_batch(
 
         # Get the shape of the ROI pool
         roi_size = roi_pool.shape[0]
+        # separate roi_pool by TF and ATAC
+        # sample w.r.t a fixed ratio
 
         # Randomly select n regions from the pool
         curr_batch_idxs = random.sample(range(roi_size), n_roi)
@@ -447,7 +572,6 @@ def create_roi_batch(
                     ).T
 
                 except:
-                    # TODO change length of array
                     target_vector = np.zeros(1024)
 
                 # change nan to numbers
@@ -463,14 +587,226 @@ def create_roi_batch(
                 # Split the data up into 32 x 32 bp bins.
                 split_targets = np.array(np.split(target_vector, n_bins, axis=0))
 
-                # TODO we might want to test what happens if we change the
                 bin_sums = np.sum(split_targets, axis=1)
                 bin_vector = np.where(bin_sums > 0.5 * bp_resolution, 1.0, 0.0)
 
                 # Append the sample to the target batch
                 targets_batch.append(bin_vector)
 
-        yield np.array(inputs_batch), np.array(targets_batch)  # change to yield
+        yield np.array(inputs_batch), np.array(
+            targets_batch
+        )  # change to yield # add class weights
+
+
+def create_roi_batch_v2(
+    sequence,
+    meta_table,
+    roi_pool_chip,
+    roi_pool_atac,
+    n_roi,
+    cell_type_list,
+    bp_resolution=1,
+    target_scale_factor=1,
+    shuffle_cell_type=False,
+    rev_comp_train=False,
+    atac_sampling_multiplier=5,
+    chip_sample_weight_baseline=5,
+):
+    """
+    Create a batch of examples from regions of interest. The batch size is defined by n_roi. This code will randomly
+    generate a batch of examples based on an input meta file that defines the paths to training data. The cell_type_list
+    is used to randomly select the cell type that the training signal is drawn from.
+
+    :param sequence: The input 2bit DNA sequence
+    :param meta_table: The meta file that contains the paths to signal and peak files
+    :param roi_pool: The pool of regions that we want to sample from
+    :param n_roi: The number of regions that go into each batch
+    :param cell_type_list: A list of unique training cell types
+    :param bp_resolution: The resolution of the output bins. i.e. 32 bp
+    :param shuffle_cell_type: Whether to shuffle cell types during training
+    :param rev_comp_train: use reverse complement for training
+
+    :return: np.array(inputs_batch), np.array(targets_batch)
+    """
+    while True:
+        # Create empty lists that will hold the signal tracks
+        inputs_batch, targets_batch, weight_batch = [], [], []
+
+        # Get the shape of the ROI pool
+        roi_size_chip = roi_pool_chip.shape[0]
+        roi_size_atac = roi_pool_atac.shape[0]
+        n_roi_chip = int(np.ceil(n_roi // (1.0 + float(atac_sampling_multiplier))))
+        n_roi_atac = n_roi - n_roi_chip
+
+        # Randomly select n regions from the pool
+        curr_batch_chip_idxs = random.sample(range(roi_size_chip), n_roi_chip)
+        curr_batch_atac_idxs = random.sample(range(roi_size_atac), n_roi_atac)
+
+        # Extract the signal for every sample
+        for row_idx in curr_batch_chip_idxs:
+            roi_row = roi_pool_chip.iloc[row_idx, :]
+
+            # If shuffle_cell_type the cell type will be randomly chosen
+            if shuffle_cell_type:
+                cell_line = random.choice(cell_type_list)
+
+            else:
+                cell_line = roi_row["Cell_Line"]
+
+            # Get the paths for the cell type of interest.
+            meta_row = meta_table[(meta_table["Cell_Line"] == cell_line)]
+            meta_row = meta_row.reset_index(drop=True)
+
+            # Rename some variables. This just helps clean up code downstream
+            chrom_name = roi_row["Chr"]
+            start = int(roi_row["Start"])
+            end = int(roi_row["Stop"])
+            weight_shrinkage_factor = float(roi_row["Weight shrinkage factor"])
+
+            signal = meta_row.loc[0, "ATAC_Signal_File"]
+            binding = meta_row.loc[0, "Binding_File"]
+
+            # Choose whether to use the reverse complement of the region
+            if rev_comp_train:
+                rev_comp = random.choice([True, False])
+
+            else:
+                rev_comp = False
+
+            with load_2bit(sequence) as sequence_stream, load_bigwig(
+                signal
+            ) as signal_stream, load_bigwig(binding) as binding_stream:
+                # Get the input matrix of values and one-hot encoded sequence
+                input_matrix = get_input_matrix(
+                    signal_stream=signal_stream,
+                    sequence_stream=sequence_stream,
+                    chromosome=chrom_name,
+                    start=start,
+                    end=end,
+                    use_complement=rev_comp,
+                    reverse_matrix=rev_comp,
+                )
+
+                # Append the sample to the inputs batch.
+                inputs_batch.append(input_matrix)
+
+                # Some bigwig files do not have signal for some chromosomes because they do not have peaks
+                # in those regions
+                # Our workaround for issue#42 is to provide a zero matrix for that position
+                try:
+                    # Get the target matrix
+                    target_vector = np.array(
+                        binding_stream.values(chrom_name, start, end)
+                    ).T
+
+                except:
+                    target_vector = np.zeros(1024)
+
+                # change nan to numbers
+                target_vector = np.nan_to_num(target_vector, 0.0)
+
+                # If reverse compliment, reverse the matrix
+                if rev_comp:
+                    target_vector = target_vector[::-1]
+
+                # get the number of 32 bp bins across the input sequence
+                n_bins = int(target_vector.shape[0] / bp_resolution)
+
+                # Split the data up into 32 x 32 bp bins.
+                split_targets = np.array(np.split(target_vector, n_bins, axis=0))
+
+                bin_sums = np.sum(split_targets, axis=1)
+                bin_vector = np.where(bin_sums > 0.5 * bp_resolution, 1.0, 0.0)
+
+                # Append the sample to the target batch
+                targets_batch.append(bin_vector)
+                weight_batch.append(
+                    float(chip_sample_weight_baseline) * weight_shrinkage_factor
+                )
+
+        for row_idx in curr_batch_atac_idxs:
+            roi_row = roi_pool_atac.iloc[row_idx, :]
+
+            # If shuffle_cell_type the cell type will be randomly chosen
+            if shuffle_cell_type:
+                cell_line = random.choice(cell_type_list)
+
+            else:
+                cell_line = roi_row["Cell_Line"]
+
+            # Get the paths for the cell type of interest.
+            meta_row = meta_table[(meta_table["Cell_Line"] == cell_line)]
+            meta_row = meta_row.reset_index(drop=True)
+
+            # Rename some variables. This just helps clean up code downstream
+            chrom_name = roi_row["Chr"]
+            start = int(roi_row["Start"])
+            end = int(roi_row["Stop"])
+
+            signal = meta_row.loc[0, "ATAC_Signal_File"]
+            binding = meta_row.loc[0, "Binding_File"]
+
+            # Choose whether to use the reverse complement of the region
+            if rev_comp_train:
+                rev_comp = random.choice([True, False])
+
+            else:
+                rev_comp = False
+
+            with load_2bit(sequence) as sequence_stream, load_bigwig(
+                signal
+            ) as signal_stream, load_bigwig(binding) as binding_stream:
+                # Get the input matrix of values and one-hot encoded sequence
+                input_matrix = get_input_matrix(
+                    signal_stream=signal_stream,
+                    sequence_stream=sequence_stream,
+                    chromosome=chrom_name,
+                    start=start,
+                    end=end,
+                    use_complement=rev_comp,
+                    reverse_matrix=rev_comp,
+                )
+
+                # Append the sample to the inputs batch.
+                inputs_batch.append(input_matrix)
+
+                # Some bigwig files do not have signal for some chromosomes because they do not have peaks
+                # in those regions
+                # Our workaround for issue#42 is to provide a zero matrix for that position
+                try:
+                    # Get the target matrix
+                    target_vector = np.array(
+                        binding_stream.values(chrom_name, start, end)
+                    ).T
+
+                except:
+                    target_vector = np.zeros(1024)
+
+                # change nan to numbers
+                target_vector = np.nan_to_num(target_vector, 0.0)
+
+                # If reverse compliment, reverse the matrix
+                if rev_comp:
+                    target_vector = target_vector[::-1]
+
+                # get the number of 32 bp bins across the input sequence
+                n_bins = int(target_vector.shape[0] / bp_resolution)
+
+                # Split the data up into 32 x 32 bp bins.
+                split_targets = np.array(np.split(target_vector, n_bins, axis=0))
+
+                bin_sums = np.sum(split_targets, axis=1)
+                bin_vector = np.where(bin_sums > 0.5 * bp_resolution, 1.0, 0.0) # why no clipping here but have so in the loss func
+
+                # Append the sample to the target batch
+                targets_batch.append(bin_vector)
+                weight_batch.append(1.0)
+
+        # shuffle all the batch matrices
+        n_roi_order=np.arange(n_roi)
+        np.random.shuffle(n_roi_order)
+
+        yield np.array(inputs_batch)[n_roi_order], np.array(targets_batch)[n_roi_order], np.array(weight_batch)[n_roi_order]
 
 
 def create_random_batch(
@@ -537,7 +873,6 @@ def create_random_batch(
                     ).T
 
                 except:
-                    # TODO change length of array
                     target_vector = np.zeros(1024)
 
                 target_vector = np.nan_to_num(target_vector, 0.0)
@@ -552,6 +887,88 @@ def create_random_batch(
                 targets_batch.append(bin_vector)
 
         yield np.array(inputs_batch), np.array(targets_batch)  # change to yield
+
+
+def create_random_batch_v2(
+    sequence,
+    meta_table,
+    cell_type_list,
+    n_rand,
+    regions_pool,
+    bp_resolution=1,
+    target_scale_factor=1,
+    rev_comp_train=False,
+):
+    """
+    This function will create a batch of examples that are randomly generated. This batch of data is created the same
+    as the roi batches.
+    """
+    while True:
+        inputs_batch, targets_batch, weights_batch = [], [], []
+
+        for idx in range(n_rand):
+            cell_line = random.choice(cell_type_list)  # Randomly select a cell line
+
+            (
+                chrom_name,
+                seq_start,
+                seq_end,
+            ) = (
+                regions_pool.get_region()
+            )  # returns random region (chrom_name, start, end)
+
+            meta_row = meta_table[
+                (meta_table["Cell_Line"] == cell_line)
+            ]  # get meta row for selected cell line
+            meta_row = meta_row.reset_index(drop=True)
+
+            signal = meta_row.loc[0, "ATAC_Signal_File"]
+            binding = meta_row.loc[0, "Binding_File"]
+
+            with load_2bit(sequence) as sequence_stream, load_bigwig(
+                signal
+            ) as signal_stream, load_bigwig(binding) as binding_stream:
+                if rev_comp_train:
+                    rev_comp = random.choice([True, False])
+
+                else:
+                    rev_comp = False
+
+                input_matrix = get_input_matrix(
+                    signal_stream=signal_stream,
+                    sequence_stream=sequence_stream,
+                    chromosome=chrom_name,
+                    start=seq_start,
+                    end=seq_end,
+                    use_complement=rev_comp,
+                    reverse_matrix=rev_comp,
+                )
+
+                inputs_batch.append(input_matrix)
+
+                try:
+                    # Get the target matrix
+                    target_vector = np.array(
+                        binding_stream.values(chrom_name, start, end)
+                    ).T
+
+                except:
+                    target_vector = np.zeros(1024)
+
+                target_vector = np.nan_to_num(target_vector, 0.0)
+
+                if rev_comp:
+                    target_vector = target_vector[::-1]
+
+                n_bins = int(target_vector.shape[0] / bp_resolution)
+                split_targets = np.array(np.split(target_vector, n_bins, axis=0))
+                bin_sums = np.sum(split_targets, axis=1)
+                bin_vector = np.where(bin_sums > 0.5 * bp_resolution, 1.0, 0.0)
+                targets_batch.append(bin_vector)
+                weights_batch.append(1.0)
+        yield np.array(inputs_batch), np.array(targets_batch), np.array(
+            weights_batch
+        )  # change to yield
 
 
 class RandomRegionsPool:
@@ -624,7 +1041,6 @@ class RandomRegionsPool:
 
     def __get_chrom_pool(self):
         """
-        TODO: rewrite to produce exactly the same number of items
         as chrom_pool_size regardless of length(chroms) and
         chrom_pool_size
         """
@@ -672,6 +1088,8 @@ class ROIPool(object):
         # If an ROI path is provided import it as the ROI pool
         if self.roi_file_path:
             self.ROI_pool = self.__import_roi_pool__(shuffle=shuffle)
+            self.ROI_pool_CHIP = self.ROI_pool[self.ROI_pool["ROI_Type"] == "CHIP"]
+            self.ROI_pool_ATAC = self.ROI_pool[self.ROI_pool["ROI_Type"] == "ATAC"]
 
         # Import the data from the meta file.
         else:
@@ -690,6 +1108,29 @@ class ROIPool(object):
             )
 
             self.ROI_pool = regions.combined_pool
+            self.ROI_pool_CHIP = regions.chip_roi_pool
+            self.ROI_pool_ATAC = regions.atac_roi_pool
+
+        (
+            self.ROI_pool_unique_region_size_CHIP,
+            self.ROI_pool_unique_region_size_ATAC,
+        ) = self.__get_unique_regions__()
+
+    def __get_unique_regions__(self):
+        # determine unique non-overlapping regions from both CHIP & ATAC ROIs
+        _ROI_pool_CHIP = copy.copy(self.ROI_pool_CHIP)
+        _ROI_pool_bedtool_CHIP = pybedtools.BedTool.from_dataframe(_ROI_pool_CHIP)
+        _ROI_pool_bedtool_CHIP_merged = _ROI_pool_bedtool_CHIP.sort(
+            chrThenSizeA=True
+        ).merge()
+
+        _ROI_pool_ATAC = copy.copy(self.ROI_pool_ATAC)
+        _ROI_pool_bedtool_ATAC = pybedtools.BedTool.from_dataframe(_ROI_pool_ATAC)
+        _ROI_pool_bedtool_ATAC_merged = _ROI_pool_bedtool_ATAC.sort(
+            chrThenSizeA=True
+        ).merge()
+
+        return len(_ROI_pool_bedtool_CHIP_merged), len(_ROI_pool_bedtool_ATAC_merged)
 
     def __import_roi_pool__(self, shuffle=False):
         """
@@ -958,7 +1399,7 @@ class GenomicRegions(object):
         return df
 
 
-def save_metadata(output_dir, args, model_config=None):
+def save_metadata(output_dir, args, model_config=None, extra=None):
     """
     Save the metadata every time the model is run
     The following data will be saved:
@@ -985,14 +1426,48 @@ def save_metadata(output_dir, args, model_config=None):
     args_dict.pop("func", None)
 
     with open(os.path.join(output_dir, "cmd_args.json"), "w+") as f:
-        json.dump(args_dict, f, sort_keys=True, indent=3)
+        json.dump(args_dict, f, sort_keys=False, indent=3)
 
     if model_config != None:
         with open(os.path.join(output_dir, "model_config.json"), "w") as f:
-            json.dump(model_config, f, sort_keys=True, indent=3)
+            json.dump(model_config, f, sort_keys=False, indent=3)
 
+    if extra!=None:
+        with open(os.path.join(output_dir, "sample_stats.json"), "w") as f:
+            json.dump(extra, f, sort_keys=False, indent=3)
 
 def get_initializer(initializer_name):
     """
     A helper function to get the
     """
+
+
+def CHIP_sample_weight_adjustment(CHIP_roi_df):
+    roi_bedtool = pybedtools.BedTool.from_dataframe(CHIP_roi_df)
+    roi_merged = roi_bedtool.sort(chrThenSizeA=True).merge()
+    roi_merged_count = roi_merged.intersect(roi_bedtool, c=True)
+
+    roi_bedtool_weighted = roi_bedtool.intersect(roi_merged_count, wa=True, wb=True)
+
+    roi_bedtool_weighted_df = pd.read_table(
+        roi_bedtool_weighted.fn,
+        header=None,
+        names=[
+            "Chr",
+            "Start",
+            "Stop",
+            "ROI_Type",
+            "Cell_Line",
+            "1",
+            "2",
+            "3",
+            "Count",
+        ],
+    )
+    roi_bedtool_weighted_df["Weight shrinkage factor"] = [
+        (1 + 1 / x) / 2 for x in roi_bedtool_weighted_df["Count"]
+    ]
+
+    return roi_bedtool_weighted_df[
+        ["Chr", "Start", "Stop", "ROI_Type", "Cell_Line", "Weight shrinkage factor"]
+    ]

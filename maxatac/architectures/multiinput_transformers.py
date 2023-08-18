@@ -55,10 +55,16 @@ with Mute():
         ENFORMER_INPUT_FILTERS,
         PREDICTION_HEAD_DROPOUT_RATE,
         RESIDUAL_CONNECTION_DROPOUT_RATE,
+        DEFAULT_COSINEDECAYRESTARTS_FIRST_DECAY_STEPS,
+        DEFAULT_COSINEDECAYRESTARTS_ALPHA,
+        DEFAULT_COSINEDECAYRESTARTS_T_MUL,
+        DEFAULT_COSINEDECAYRESTARTS_M_MUL,
+        DEFAULT_COSINEDECAYRESTARTS_INITIAL_LR_MULTIPLIER,
     )
 
     from maxatac.architectures.dcnn import (
         loss_function,
+        loss_function_focal_class,
         dice_coef,
         get_layer,
         get_residual_layer,
@@ -178,14 +184,14 @@ def get_conv_tower(
     count = 0
     for conv_block_config in conv_tower_configs:
         count += 1
-        print(f"before conv block: {inbound_layer.shape}")
+        # print(f"before conv block: {inbound_layer.shape}")
         if use_residual:
             inbound_layer = get_residual_layer(
                 inbound_layer,
                 get_conv_block(
                     inbound_layer,
                     conv_block_config,
-                    base_name=f"{base_name}_conv_tower_block_{count}",
+                    base_name=f"{base_name}_B_{count}",
                     use_residual=use_residual,
                     suppress_activation=suppress_activation,
                     pre_activation=pre_activation,
@@ -197,12 +203,12 @@ def get_conv_tower(
             inbound_layer = get_conv_block(
                 inbound_layer,
                 conv_block_config,
-                base_name=f"{base_name}_conv_tower_block_{count}",
+                base_name=f"{base_name}_B_{count}",
                 use_residual=use_residual,
                 suppress_activation=suppress_activation,
                 pre_activation=pre_activation,
             )
-        print(f"after conv block: {inbound_layer.shape}")
+        # print(f"after conv block: {inbound_layer.shape}")
         # After each conv block, use maxpooling to reduce seq len by 2
         # set option to downsample whether with maxpooling or conv1d stride 2
         if downsample_method == "maxpooling":
@@ -210,16 +216,18 @@ def get_conv_tower(
                 pool_size=5,
                 strides=2,
                 padding="same",
-                name=f"{base_name}_Conv_tower_block_{count}_maxpool",
+                name=f"{base_name}_B_{count}_DS_maxpool",
             )(inbound_layer)
+            inbound_layer = BatchNormalization()(inbound_layer)
         else:
             inbound_layer = Conv1D(
                 filters=conv_block_config["num_filters"],
                 kernel_size=conv_block_config["kernel"],
                 strides=2,
                 padding="same",
-                name=f"{base_name}_Conv_tower_block_{count}_downsampling_conv",
+                name=f"{base_name}_B_{count}_DS_conv",
             )(inbound_layer)
+            inbound_layer = BatchNormalization()(inbound_layer)
 
     return inbound_layer
 
@@ -397,10 +405,6 @@ def get_multiinput_transformer(
     atacseq_layer = atacseq_input
     filters = input_filters  # redefined in encoder/decoder loops
 
-    if model_config["SUPPRESS_DROPOUT"]:
-        PREDICTION_HEAD_DROPOUT_RATE=None
-        RESIDUAL_CONNECTION_DROPOUT_RATE=None
-
     if (
         "USING_BASENJI_KERNEL" in model_config.keys()
         and model_config["USING_BASENJI_KERNEL"]
@@ -527,22 +531,21 @@ def get_multiinput_transformer(
         genome_layer,
         model_config["CONV_TOWER_CONFIGS_FUSION"]["genome"],
         model_config["DOWNSAMPLE_METHOD_CONV_TOWER"],
-        base_name="genome_tower",
+        base_name="GENOME_tower",
         use_residual=model_config["CONV_TOWER_CONFIGS_FUSION"]["use_residual"],
         suppress_activation=True,
         pre_activation=True,
-        residual_connection_dropout_rate=RESIDUAL_CONNECTION_DROPOUT_RATE
-
+        residual_connection_dropout_rate=model_config["RESIDUAL_CONNECTION_DROPOUT_RATE"] if model_config["SUPPRESS_DROPOUT"]==False else None,
     )
     atacseq_layer = get_conv_tower(
         atacseq_layer,
         model_config["CONV_TOWER_CONFIGS_FUSION"]["atac"],
         model_config["DOWNSAMPLE_METHOD_CONV_TOWER"],
-        base_name="atac_tower",
+        base_name="ATAC_tower",
         use_residual=model_config["CONV_TOWER_CONFIGS_FUSION"]["use_residual"],
         suppress_activation=True,
         pre_activation=True,
-        residual_connection_dropout_rate=RESIDUAL_CONNECTION_DROPOUT_RATE
+        residual_connection_dropout_rate=model_config["RESIDUAL_CONNECTION_DROPOUT_RATE"] if model_config["SUPPRESS_DROPOUT"]==False else None,
     )
 
     # genome_layer and atacseq_layer now should have shape (batch, seq_len, mha_embed_dim // 2)
@@ -603,8 +606,9 @@ def get_multiinput_transformer(
     # use only sequence side
     _offset = layer.shape[1] // 2
     layer = tf.keras.layers.Lambda(
-        lambda x: x[:, :_offset, :], name="Extract_Sequence_Positions"
+        lambda x: x[:, :_offset, :], name="Extract_sequence_region_INFO"
     )(layer)
+
     _prediction_head_config = {
         "activation": "relu",
         "kernel": 10,
@@ -613,12 +617,13 @@ def get_multiinput_transformer(
         "padding": "same",
         "stride": 1,
     }
+    model_config["prediction_head_config"] = _prediction_head_config
 
     layer = get_conv_block(
         layer,
         _prediction_head_config,
         base_name="Pre_prediction_head",
-        dropout_rate=PREDICTION_HEAD_DROPOUT_RATE,
+        dropout_rate=model_config["PREDICTION_HEAD_DROPOUT_RATE"],
         suppress_activation=True,
         use_residual=False,
         pre_activation=True,
@@ -649,6 +654,7 @@ def get_multiinput_transformer(
             kernel_initializer=KERNEL_INITIALIZER,
             skip_batch_norm=True,
             n=1,
+            focal_initializing=model_config["FOCAL_LOSS"]
         )
 
     # Downsampling from 1024 to 32 (change this) for a dynamic change
@@ -675,6 +681,23 @@ def get_multiinput_transformer(
 
     # Model
     model = Model(inputs=[genome_input, atacseq_input], outputs=output_layer)
+
+    # lr schedule
+    if model_config["COSINEDECAYRESTARTS"]:
+        lr_schedule = tf.keras.optimizers.schedules.CosineDecayRestarts(
+            initial_learning_rate=model_config["INITIAL_LEARNING_RATE"]
+            * DEFAULT_COSINEDECAYRESTARTS_INITIAL_LR_MULTIPLIER,
+            first_decay_steps=model_config["COSINEDECAYRESTARTS_FIRST_DECAY_STEPS"],
+            t_mul=DEFAULT_COSINEDECAYRESTARTS_T_MUL,
+            m_mul=DEFAULT_COSINEDECAYRESTARTS_M_MUL,
+            alpha=DEFAULT_COSINEDECAYRESTARTS_ALPHA,
+        )
+    else:
+        lr_schedule = (
+            model_config["INITIAL_LEARNING_RATE"]
+            if model_config["OPTIMIZER"] != "Lion"
+            else model_config["INITIAL_LEARNING_RATE"] / 3.0
+        )
 
     if (
         "USING_BASENJI_KERNEL" in model_config.keys()
@@ -713,31 +736,42 @@ def get_multiinput_transformer(
 
     if model_config["OPTIMIZER"] == "Adam":
         optimizer = Adam(
-            learning_rate=adam_learning_rate,
+            learning_rate=lr_schedule,
             beta_1=adam_beta_1,
             beta_2=adam_beta_2,
             weight_decay=adam_decay,
         )
     elif model_config["OPTIMIZER"] == "AdamW":
         optimizer = AdamW(
-            learning_rate=adam_learning_rate,
+            learning_rate=lr_schedule,
             beta_1=adam_beta_1,
             beta_2=adam_beta_2,
             weight_decay=adam_decay,
         )
     elif model_config["OPTIMIZER"] == "Lion":
         optimizer = Lion(
-            learning_rate=adam_learning_rate,
+            learning_rate=lr_schedule,
             beta_1=adam_beta_1,
-            beta_2=adam_beta_2,
-            weight_decay=adam_decay,
+            beta_2=0.99,
+            # weight_decay=adam_decay,
         )
 
-    model.compile(
-        optimizer,
-        loss=loss_function,
-        metrics=[dice_coef],
-    )
+    if model_config["FOCAL_LOSS"]==False:
+        model.compile(
+            optimizer,
+            loss=loss_function,
+            metrics=[dice_coef],
+        )
+    else:
+        model.compile(
+            optimizer,
+            loss=loss_function_focal_class(
+                alpha=model_config["FOCAL_LOSS_ALPHA"],
+                gamma=model_config["FOCAL_LOSS_GAMMA"],
+                apply_class_balancing=model_config["FOCAL_LOSS_APPLY_ALPHA"]
+            ),
+            metrics=[dice_coef],
+        )
 
     logging.debug("Model compiled")
 
