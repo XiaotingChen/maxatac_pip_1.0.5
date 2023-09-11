@@ -344,6 +344,7 @@ def make_stranded_predictions(model_config: dict,
         nn_model = maxatac_model.nn_model
 
 
+
     # Checking the log error file, it shows that this log appears after the log above displays a lot of times
     # So I think what happened is that because this make_stranded_predictions is wrapped around a Pool multiprocessing,
     # All of the trained TF models for all chrs are loaded first before it starts going to the generator

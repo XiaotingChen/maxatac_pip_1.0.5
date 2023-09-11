@@ -547,6 +547,7 @@ def get_dilated_cnn_with_attention(
             kernel_initializer="glorot_uniform",
         )(output_layer)
 
+
     logging.debug("Added outputs layer: " + "\n - " + str(output_layer))
 
     # Model

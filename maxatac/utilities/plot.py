@@ -15,6 +15,7 @@ with Mute():
 
 
 
+
 def plot_attention_weights(model, transformer_names, data_sample, num_heads, file_location, use_rpe):
     """
     Plot the attention weights of all heads for all transformer layers

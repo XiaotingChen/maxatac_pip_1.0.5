@@ -35,6 +35,7 @@ with Mute():
     )
 
 
+
 def run_training(args):
     """
     Train a maxATAC model using ATAC-seq and ChIP-seq data
@@ -87,6 +88,7 @@ def run_training(args):
     startTime = timeit.default_timer()
 
     logging.error("Set up model parameters")
+
 
     # Read model config
     with open(args.model_config, "r") as f:
@@ -217,6 +219,7 @@ def run_training(args):
 
     logging.error("Initialize data generator")
 
+
     # The function returns a generator that each next() yields an input_batch and a target_batch, which in ML language might be features X and labels y
     # There's the rand_ratio that defines the ratio at which the random genome regions and the ROI regions are taken
 
@@ -251,6 +254,7 @@ def run_training(args):
             chip_sample_weight_baseline=args.CHIP_Sample_Weight_Baseline,
         )
 
+
     # Create keras.utils.sequence object from training generator
     seq_train_gen = SeqDataGenerator(batches=args.batch_size, generator=train_gen)
 
@@ -277,6 +281,7 @@ def run_training(args):
     enq_train_gen = (
         train_gen_enq.get()
     )  # enq_train_gen is now a generator to extract data from the queue
+
 
     # Initialize the validation generator
     if args.ATAC_Sampling_Multiplier == 0:

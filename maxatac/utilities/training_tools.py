@@ -10,7 +10,6 @@ import threading
 import pybedtools
 import os
 import glob
-
 import json
 import ntpath
 import shutil
@@ -18,6 +17,7 @@ import copy
 from maxatac.utilities import constants
 from maxatac.architectures.dcnn import get_dilated_cnn, get_dilated_cnn_with_attention
 from maxatac.architectures.transformers import get_transformer
+
 
 from maxatac.architectures.multiinput_transformers import get_multiinput_transformer
 from maxatac.architectures.multiinput_crossatt_transformers import (
@@ -41,6 +41,7 @@ from maxatac.utilities.genome_tools import (
     get_one_hot_encoded,
     build_chrom_sizes_dict,
 )
+
 from maxatac.utilities.system_tools import get_dir, remove_tags, replace_extension
 
 
@@ -151,6 +152,7 @@ class MaxATACModel(object):
                 dense_b=self.dense,
                 weights=self.weights,
             )
+
 
         elif self.arch == "DCNN_V2_attention":
             return get_dilated_cnn_with_attention(
@@ -1399,6 +1401,7 @@ class GenomicRegions(object):
         return df
 
 
+
 def save_metadata(output_dir, args, model_config=None, extra=None):
     """
     Save the metadata every time the model is run
@@ -1471,3 +1474,4 @@ def CHIP_sample_weight_adjustment(CHIP_roi_df):
     return roi_bedtool_weighted_df[
         ["Chr", "Start", "Stop", "ROI_Type", "Cell_Line", "Weight shrinkage factor"]
     ]
+

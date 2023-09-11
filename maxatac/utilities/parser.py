@@ -27,6 +27,7 @@ with Mute():
     from maxatac.analyses.transformer_interpret import run_transformer_interpret
 
 
+
 from maxatac.utilities.phuc_utilities import phuc_func
 from maxatac.utilities.constants import (
     DEFAULT_TRAIN_VALIDATE_CHRS,
@@ -240,7 +241,6 @@ def get_parser():
     )
 
     #############################################
-
     # Data subparser
     #############################################
     data_parser = subparsers.add_parser(
@@ -1154,6 +1154,7 @@ def get_parser():
         default=False,
         help="If rev_comp, then use the reverse complement in training",
     )
+
 
     #############################################
     # Normalize parser
