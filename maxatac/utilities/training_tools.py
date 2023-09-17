@@ -796,17 +796,149 @@ def create_roi_batch_v2(
                 split_targets = np.array(np.split(target_vector, n_bins, axis=0))
 
                 bin_sums = np.sum(split_targets, axis=1)
-                bin_vector = np.where(bin_sums > 0.5 * bp_resolution, 1.0, 0.0) # why no clipping here but have so in the loss func
+                bin_vector = np.where(
+                    bin_sums > 0.5 * bp_resolution, 1.0, 0.0
+                )  # why no clipping here but have so in the loss func
 
                 # Append the sample to the target batch
                 targets_batch.append(bin_vector)
                 weight_batch.append(1.0)
 
         # shuffle all the batch matrices
-        n_roi_order=np.arange(n_roi)
+        n_roi_order = np.arange(n_roi)
         np.random.shuffle(n_roi_order)
 
-        yield np.array(inputs_batch)[n_roi_order], np.array(targets_batch)[n_roi_order], np.array(weight_batch)[n_roi_order]
+        yield np.array(inputs_batch)[n_roi_order], np.array(targets_batch)[
+            n_roi_order
+        ], np.array(weight_batch)[n_roi_order]
+
+
+class ValidDataGen:
+    def __init__(
+        self,
+        sequence,
+        meta_table,
+        roi_pool_atac,
+        roi_pool_chip,
+        cell_type_list,
+        bp_resolution=BP_RESOLUTION,
+        target_scale_factor=1,
+        atac_sampling_multiplier=5,
+        chip_sample_weight_baseline=5,
+        batch_size=100,
+        shuffle=True,
+    ):
+        "Initialization"
+        self.roi_pool_chip = roi_pool_chip.copy()
+        self.roi_pool_atac = roi_pool_atac.copy()
+        self.sequence = sequence
+        self.meta_table = meta_table
+        self.cell_type_list = cell_type_list
+        self.bp_resolution = bp_resolution
+        self.target_scale_factor = target_scale_factor
+        self.atac_sampling_multiplier = atac_sampling_multiplier
+        self.chip_sample_weight_baseline = chip_sample_weight_baseline
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+
+        self.roi_pool_atac["Weight shrinkage factor"] = 1.0 / float(
+            self.chip_sample_weight_baseline
+        )
+        self.roi_pool = pd.concat([self.roi_pool_atac, self.roi_pool_chip])
+        self.roi_pool.reset_index(drop=True, inplace=True)
+        self.total_size = self.roi_pool.shape[0]
+        self.indexes = np.arange(self.total_size)
+        if self.shuffle == True:
+            np.random.shuffle(self.indexes)
+
+    def __len__(self):
+        "Denotes the number of batches per epoch"
+        return int(np.floor(self.total_size / self.batch_size))
+
+    def get_item(self, index):
+        X, y, w = self.__data_generation(index)
+        return X, y, w
+
+    def __call__(self):
+        for index in np.arange(self.total_size):
+            yield self.get_item(index)
+
+    def __data_generation(self, index):
+        "Generates data containing batch_size samples"
+
+        # Initialization
+        # Extract the signal for every sample
+        roi_row = self.roi_pool.iloc[index : index + 1, :]
+        cell_line = roi_row["Cell_Line"].values[0]
+
+        # Get the paths for the cell type of interest.
+        meta_row = self.meta_table[(self.meta_table["Cell_Line"] == cell_line)]
+        meta_row = meta_row.reset_index(drop=True)
+
+        # Rename some variables. This just helps clean up code downstream
+        chrom_name = roi_row["Chr"].values[0]
+        start = int(roi_row["Start"].values[0])
+        end = int(roi_row["Stop"].values[0])
+        weight_shrinkage_factor = float(roi_row["Weight shrinkage factor"].values[0])
+
+        signal = meta_row.loc[0, "ATAC_Signal_File"]
+        binding = meta_row.loc[0, "Binding_File"]
+
+        with load_2bit(self.sequence) as sequence_stream, load_bigwig(
+            signal
+        ) as signal_stream, load_bigwig(binding) as binding_stream:
+            # Get the input matrix of values and one-hot encoded sequence
+            input_matrix = get_input_matrix(
+                signal_stream=signal_stream,
+                sequence_stream=sequence_stream,
+                chromosome=chrom_name,
+                start=start,
+                end=end,
+                use_complement=False,
+                reverse_matrix=False,
+            )
+
+            # Append the sample to the inputs batch.
+            # inputs_batch.append(input_matrix)
+
+            # Some bigwig files do not have signal for some chromosomes because they do not have peaks
+            # in those regions
+            # Our workaround for issue#42 is to provide a zero matrix for that position
+            try:
+                # Get the target matrix
+                target_vector = np.array(
+                    binding_stream.values(chrom_name, start, end)
+                ).T
+
+            except:
+                target_vector = np.zeros(1024)
+
+            # change nan to numbers
+            target_vector = np.nan_to_num(target_vector, 0.0)
+
+            # get the number of 32 bp bins across the input sequence
+            n_bins = int(target_vector.shape[0] / self.bp_resolution)
+
+            # Split the data up into 32 x 32 bp bins.
+            split_targets = np.array(np.split(target_vector, n_bins, axis=0))
+
+            bin_sums = np.sum(split_targets, axis=1)
+            bin_vector = np.where(bin_sums > 0.5 * self.bp_resolution, 1.0, 0.0)
+
+            # Append the sample to the target batch
+            # targets_batch.append(bin_vector)
+            # weight_batch.append(
+            #     float(self.chip_sample_weight_baseline) * weight_shrinkage_factor
+            # )
+
+            #sequence_input_matrix = np.array(input_matrix)[:, :4]
+            #signal_input_matrix = np.array(input_matrix)[:, 4:]
+
+        return (
+            input_matrix,
+            np.array(bin_vector),
+            np.array(float(self.chip_sample_weight_baseline) * weight_shrinkage_factor),
+        )
 
 
 def create_random_batch(
@@ -1432,9 +1564,10 @@ def save_metadata(output_dir, args, model_config=None, extra=None):
         with open(os.path.join(output_dir, "model_config.json"), "w") as f:
             json.dump(model_config, f, sort_keys=False, indent=3)
 
-    if extra!=None:
+    if extra != None:
         with open(os.path.join(output_dir, "sample_stats.json"), "w") as f:
             json.dump(extra, f, sort_keys=False, indent=3)
+
 
 def get_initializer(initializer_name):
     """

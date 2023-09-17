@@ -395,8 +395,14 @@ def get_multiinput_transformer(
     logging.debug("Building Dilated CNN model")
 
     # Current there are two inputs: one for the genome sequence, one for the ATAC-seq signal
-    genome_input = Input(shape=(input_length, 4), name="genome")
-    atacseq_input = Input(shape=(input_length, 1), name="atac")
+    _input=Input(shape=(input_length, 5),)
+
+    genome_input = tf.keras.layers.Lambda(
+        lambda x: x[:, :, :4], name="genome"
+    )(_input)
+    atacseq_input = tf.keras.layers.Lambda(
+        lambda x: x[:, :, 4:], name="atac"
+    )(_input)
 
     # The current feature dim to the transformer is 64
     # Using 2 inputs, each input will be transformed to feature dim of 32
@@ -680,7 +686,7 @@ def get_multiinput_transformer(
     logging.debug("Added outputs layer: " + "\n - " + str(output_layer))
 
     # Model
-    model = Model(inputs=[genome_input, atacseq_input], outputs=output_layer)
+    model = Model(inputs=[_input], outputs=output_layer)
 
     # lr schedule
     if model_config["COSINEDECAYRESTARTS"]:
