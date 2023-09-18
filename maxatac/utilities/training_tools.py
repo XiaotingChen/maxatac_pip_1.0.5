@@ -844,25 +844,26 @@ class ValidDataGen:
         self.roi_pool_atac["Weight shrinkage factor"] = 1.0 / float(
             self.chip_sample_weight_baseline
         )
+        _total_size=self.roi_pool_chip.shape[0]+self.roi_pool_atac.shape[0]
+        _number_to_drop=_total_size%self.batch_size
+        _idx_to_drop=np.random.choice(np.arange(self.roi_pool_atac.shape[0]),size=_number_to_drop,replace=False)
+        self.roi_pool_atac.drop(_idx_to_drop,axis=0,inplace=True)
+        # need to drop a few in atac roi to enforce all chip samples in the evaluation
         self.roi_pool = pd.concat([self.roi_pool_atac, self.roi_pool_chip])
         self.roi_pool.reset_index(drop=True, inplace=True)
         self.total_size = self.roi_pool.shape[0]
         self.indexes = np.arange(self.total_size)
         if self.shuffle == True:
             np.random.shuffle(self.indexes)
-
     def __len__(self):
         "Denotes the number of batches per epoch"
         return int(np.floor(self.total_size / self.batch_size))
-
     def get_item(self, index):
         X, y, w = self.__data_generation(index)
         return X, y, w
-
     def __call__(self):
         for index in np.arange(self.total_size):
             yield self.get_item(index)
-
     def __data_generation(self, index):
         "Generates data containing batch_size samples"
 
@@ -939,7 +940,6 @@ class ValidDataGen:
             np.array(bin_vector),
             np.array(float(self.chip_sample_weight_baseline) * weight_shrinkage_factor),
         )
-
 
 def create_random_batch(
     sequence,

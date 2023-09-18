@@ -374,11 +374,12 @@ def run_training(args):
             enq_train_gen,  # model.fit() accepts a generator or Sequence that returns (inputs, targets). From the doc, when x is a generator, y should not be specified
             epochs=args.epochs,
             steps_per_epoch=steps_per_epoch_v2,
-            validation_data=valid_data.take((validate_examples.ROI_pool.shape[0] // args.batch_size)*args.batch_size)
+            validation_data=valid_data
+            .take((validate_examples.ROI_pool.shape[0] // args.batch_size)*args.batch_size)
             .cache()
             .repeat(args.epochs)
-            .batch(batch_size=args.batch_size, num_parallel_calls=args.threads*2, drop_remainder=True)
-            .prefetch(args.batch_size*2),
+            .batch(batch_size=args.batch_size, num_parallel_calls=tensorflow.data.AUTOTUNE, drop_remainder=True)
+            .prefetch(tensorflow.data.AUTOTUNE),
             validation_steps=validate_examples.ROI_pool.shape[0] // args.batch_size,
             callbacks=get_callbacks(
                 model_location=maxatac_model.results_location,
