@@ -116,6 +116,9 @@ def get_conv_block(
     use_residual=False,
     suppress_activation=False,
     pre_activation=False,
+    regularization=False,
+    l1=0.0,
+    l2=0.0
 ):
     """
     Feed the input through some conv layers.
@@ -124,9 +127,9 @@ def get_conv_block(
     for l in range(conv_block_config["num_layer"]):
         if conv_block_config["activation"] == "gelu":
             if hasattr(tf.keras.activations, "gelu"):
-                activation = tf.keras.activations.gelu(x, approximate=False)
+                activation = lambda x: tf.keras.activations.gelu(x, approximate=False)
             else:
-                activation = tfa.activations.gelu(x, approximate=False)
+                activation = lambda x: tfa.activations.gelu(x, approximate=False)
         else:
             activation = tf.keras.layers.Activation(
                 conv_block_config["activation"], name=base_name + f"_relu_{l+1}"
@@ -144,6 +147,7 @@ def get_conv_block(
                 strides=conv_block_config["stride"],
                 activation="linear",
                 name=base_name + f"_conv_layer_{l+1}",
+                kernel_regularizer=tf.keras.regularizers.L1L2(l1, l2) if regularization else None
             )(inbound_layer)
         else:
             inbound_layer = Conv1D(
@@ -633,6 +637,9 @@ def get_multiinput_transformer(
         suppress_activation=True,
         use_residual=False,
         pre_activation=True,
+        regularization=model_config["REGULARIZATION"],
+        l1=model_config["ELASTIC_L1"],
+        l2=model_config["ELASTIC_L2"],
     )
 
     # Outputs
@@ -660,7 +667,7 @@ def get_multiinput_transformer(
             kernel_initializer=KERNEL_INITIALIZER,
             skip_batch_norm=True,
             n=1,
-            focal_initializing=model_config["FOCAL_LOSS"]
+            focal_initializing=model_config["FOCAL_LOSS"],
         )
 
     # Downsampling from 1024 to 32 (change this) for a dynamic change

@@ -846,6 +846,7 @@ class ValidDataGen:
         )
         _total_size=self.roi_pool_chip.shape[0]+self.roi_pool_atac.shape[0]
         _number_to_drop=_total_size%self.batch_size
+        self.roi_pool_atac.reset_index(drop=True,inplace=True)
         _idx_to_drop=np.random.choice(np.arange(self.roi_pool_atac.shape[0]),size=_number_to_drop,replace=False)
         self.roi_pool_atac.drop(_idx_to_drop,axis=0,inplace=True)
         # need to drop a few in atac roi to enforce all chip samples in the evaluation

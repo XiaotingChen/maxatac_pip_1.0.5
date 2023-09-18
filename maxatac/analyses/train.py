@@ -119,6 +119,9 @@ def run_training(args):
     model_config["FOCAL_LOSS_APPLY_ALPHA"] = args.FOCAL_LOSS_APPLY_ALPHA
 
     model_config["INITIAL_LEARNING_RATE"] = args.INITIAL_LEARNING_RATE
+    model_config["REGULARIZATION"] = args.REGULARIZATION
+    model_config["ELASTIC_L1"] = args.ELASTIC_L1
+    model_config["ELASTIC_L2"] = args.ELASTIC_L2
 
     # Initialize the model with the architecture of choice
     maxatac_model = MaxATACModel(

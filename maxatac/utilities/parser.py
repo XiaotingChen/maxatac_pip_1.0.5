@@ -930,6 +930,32 @@ def get_parser():
         help="Set RESIDUAL_CONNECTION_DROPOUT_RATE.",
     )
 
+    train_parser.add_argument(
+        "--REGULARIZATION",
+        dest="REGULARIZATION",
+        action="store_true",
+        default=False,
+        help="Set REGULARIZATION.",
+    )
+
+    train_parser.add_argument(
+        "--ELASTIC_L1",
+        dest="ELASTIC_L1",
+        type=float,
+        action="store",
+        default=0.001,
+        help="Set ELASTIC_L1.",
+    )
+
+    train_parser.add_argument(
+        "--ELASTIC_L2",
+        dest="ELASTIC_L2",
+        type=float,
+        action="store",
+        default=0.001,
+        help="Set ELASTIC_L2.",
+    )
+
     #############################################
     # Pretrain parser
     #############################################

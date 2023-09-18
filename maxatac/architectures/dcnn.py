@@ -273,6 +273,9 @@ def get_layer(
     name=None,
     pre_activation=False,
     focal_initializing=False,
+    regularization=False,
+    l1=0.0,
+    l2=0.0
 ):
     """
     Returns new layer without max pooling. If concat_layer,
@@ -293,6 +296,7 @@ def get_layer(
                 kernel_initializer=kernel_initializer,
                 use_bias=use_bias,
                 name=name,
+                kernel_regularizer=tf.keras.regularizers.L1L2(l1,l2) if regularization else None
             )(inbound_layer)
             inbound_layer = BatchNormalization()(inbound_layer)
         else:
@@ -306,6 +310,7 @@ def get_layer(
                     kernel_initializer=kernel_initializer,
                     use_bias=use_bias,
                     name=name,
+                    kernel_regularizer=tf.keras.regularizers.L1L2(l1, l2) if regularization else None
                 )(inbound_layer)
             else:
                 inbound_layer = Conv1D(
@@ -318,6 +323,7 @@ def get_layer(
                     use_bias=True,
                     bias_initializer=tf.keras.initializers.Constant(-2), #
                     name=name,
+                    kernel_regularizer=tf.keras.regularizers.L1L2(l1, l2) if regularization else None
                 )(inbound_layer)
             if not skip_batch_norm:
                 inbound_layer = BatchNormalization()(inbound_layer)

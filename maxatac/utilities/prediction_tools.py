@@ -304,6 +304,114 @@ class PredictionDataGenerator(tf.keras.utils.Sequence):
         return np.array(inputs_batch)
 
 
+class PredictionDataGenerator_tfds(tf.keras.utils.Sequence):
+    def __init__(self,
+                 signal,
+                 sequence,
+                 predict_roi_df,
+                 input_channels: int = INPUT_CHANNELS,
+                 input_length: int = INPUT_LENGTH,
+                 batch_size=32,
+                 use_complement=False,
+                 inter_fusion=False
+                 ):
+        """
+        Initialize the training generator. This is a keras sequence class object. It is used
+        to make sure each batch is unique and sequentially generated.
+
+        :param signal: ATAC-seq signal track
+        :param sequence: 2Bit DNA sequence track
+        :param input_channels: How many channels there are
+        :param input_length: length of receptive field
+        :param predict_roi_df: Dataframe that contains the BED intervals to predict on
+        :param batch_size: Size of each training batch or # of examples per batch
+        :param use_complement: Whether to use the forward or reverse (complement) strand
+        """
+        self.batch_size = batch_size
+        self.predict_roi_df = predict_roi_df
+        self.indexes = np.arange(self.predict_roi_df.shape[0])
+        self.signal = signal
+        self.sequence = sequence
+        self.input_channels = input_channels
+        self.input_length = input_length
+        self.use_complement = use_complement
+        self.inter_fusion = inter_fusion
+
+        self.predict_roi_df.reset_index(inplace=True, drop=True)
+
+    def __len__(self):
+        """
+        Denotes the number of batches per epoch
+        """
+        if self.predict_roi_df.shape[0] < self.batch_size:
+            num_batches = 1
+
+        else:
+            num_batches = int(self.predict_roi_df.shape[0] / self.batch_size)
+
+        return num_batches
+
+    def __getitem__(self, index):
+        """
+        Generate one batch of data
+
+        :param index: current index of batch that we are on
+        """
+        # Generate indexes of the batch
+        batch_indexes = self.indexes[index * self.batch_size:(index + 1) * self.batch_size]
+
+        # Generate data (X has shape (batch, seq_len, dim))
+        X = self.__data_generation__(batch_indexes)
+
+        return X
+
+    def __data_generation__(self, batch_indexes):
+        """
+        Generates data containing batch_size samples
+
+        :param batch_indexes: list of indexes of to use for batch
+        """
+        # Store sample
+        batch_roi_df = self.predict_roi_df.loc[batch_indexes, :]
+
+        batch_roi_df.reset_index(drop=True, inplace=True)
+
+        batch = self.__get_region_values__(roi_pool=batch_roi_df)
+
+        return batch
+
+    def __get_region_values__(self, roi_pool):
+        """
+        Get the bigwig values for each ROI in the ROI pool
+
+        :param roi_pool: Pool of regions to make predictions on
+        """
+        # Create the lists to hold the batch data
+        inputs_batch = []
+
+        # Calculate the size of the predictions pool
+        roi_size = roi_pool.shape[0]
+
+        # With the files loaded get the data
+        with load_bigwig(self.signal) as signal_stream, load_2bit(self.sequence) as sequence_stream:
+            for row_idx in range(roi_size):
+                # Get the single row
+                row = roi_pool.loc[row_idx, :]
+
+                # Get the matric of values for the entry
+                input_matrix = get_input_matrix(signal_stream=signal_stream,
+                                                sequence_stream=sequence_stream,
+                                                chromosome=row[0],
+                                                start=int(row[1]),
+                                                end=int(row[2]),
+                                                use_complement=self.use_complement,
+                                                reverse_matrix=self.use_complement)
+
+                # Append the matrix of values to the batch list
+                inputs_batch.append(input_matrix)
+
+        return np.array(inputs_batch)
+
 def make_stranded_predictions(model_config: dict,
                               roi_pool: pd.DataFrame,
                               signal: str,
@@ -351,7 +459,7 @@ def make_stranded_predictions(model_config: dict,
 
     # This returns a numpy array
 
-    data_generator = PredictionDataGenerator(signal=signal,
+    data_generator = PredictionDataGenerator_tfds(signal=signal,
                                              sequence=sequence,
                                              input_channels=input_channels,
                                              input_length=input_length,
