@@ -956,6 +956,44 @@ def get_parser():
         help="Set ELASTIC_L2.",
     )
 
+    train_parser.add_argument(
+        "--chromosome_size_file",
+        dest="chromosome_size_file",
+        type=str,
+        help="The chromosome sizes file to reference",
+    )
+
+    train_parser.add_argument(
+        "--get_tfds",
+        dest="get_tfds",
+        action="store_true",
+        default=False,
+        help="Whether to only generate training tfds",
+    )
+
+    train_parser.add_argument(
+        "--tfds_meta",
+        dest="tfds_meta",
+        action="store",
+        help="Where to store tfds meta file",
+    )
+
+    train_parser.add_argument(
+        "--tfds_path",
+        dest="tfds_path",
+        action="store",
+        default="/data/weirauchlab/team/ches2d/MyTools/maxATAC_DATA",
+        help="Where to store tfds data",
+    )
+
+    train_parser.add_argument(
+        "--flanking_size",
+        dest="flanking_size",
+        action="store",
+        type=int,
+        default=512,
+        help="Flanking sequence size for shifting",
+    )
     #############################################
     # Pretrain parser
     #############################################

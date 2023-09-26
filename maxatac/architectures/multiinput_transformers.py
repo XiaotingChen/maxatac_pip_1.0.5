@@ -608,7 +608,7 @@ def get_multiinput_transformer(
                 name=f"Transformer_block_{i}",
             )
             outputs = deepmind_transformer_block(layer)
-            logging.error(f"Length of transformer block output: {len(outputs)}")
+            # logging.error(f"Length of transformer block output: {len(outputs)}")
             layer = outputs[0]
 
     # Final postprocessing

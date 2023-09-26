@@ -5,12 +5,19 @@ import numpy as np
 import json
 import shutil
 import timeit
+
+import pandas as pd
 import tensorflow
 
 # from keras.utils.data_utils import OrderedEnqueuer
 from tensorflow.keras.utils import OrderedEnqueuer
 
-from maxatac.utilities.constants import TRAIN_MONITOR
+from maxatac.utilities.constants import (
+    TRAIN_MONITOR,
+    INPUT_LENGTH,
+    INPUT_CHANNELS,
+    OUTPUT_LENGTH,
+)
 from maxatac.utilities.system_tools import Mute
 from maxatac.utilities.phuc_utilities import generate_numpy_arrays
 
@@ -27,12 +34,18 @@ with Mute():
         save_metadata,
         CHIP_sample_weight_adjustment,
         ValidDataGen,
+        DataGen,
+        peak_centric_map,
+        random_shuffling_map
     )
     from maxatac.utilities.plot import (
         export_binary_metrics,
         export_loss_mse_coeff,
         export_model_structure,
         plot_attention_weights,
+    )
+    from maxatac.utilities.genome_tools import (
+        build_chrom_sizes_dict,
     )
 
 
@@ -175,12 +188,11 @@ def run_training(args):
 
     if args.ATAC_Sampling_Multiplier != 0:
         steps_per_epoch_v2 = int(
-            train_examples.ROI_pool_unique_region_size_CHIP
-            // np.ceil((args.batch_size / (1 + args.ATAC_Sampling_Multiplier)))
+            train_examples.ROI_pool_CHIP.shape[0]
+            // np.ceil((args.batch_size / (1.0 + float(args.ATAC_Sampling_Multiplier))))
         )
         validation_steps_v2 = int(
-            validate_examples.ROI_pool_unique_region_size_CHIP
-            // np.ceil((args.batch_size / (1 + args.ATAC_Sampling_Multiplier)))
+            validate_examples.ROI_pool.shape[0] // args.batch_size
         )  # under a fixed ratio of 5, we are probably just under-sample to 1/3 of the total background
 
         # Save metadata
@@ -224,42 +236,168 @@ def run_training(args):
 
     logging.error("Initialize data generator")
 
-    # The function returns a generator that each next() yields an input_batch and a target_batch, which in ML language might be features X and labels y
-    # There's the rand_ratio that defines the ratio at which the random genome regions and the ROI regions are taken
-
-    # Initialize the training generator
-    if args.ATAC_Sampling_Multiplier == 0:
-        train_gen = DataGenerator(
-            sequence=args.sequence,
-            meta_table=maxatac_model.meta_dataframe,
-            roi_pool=train_examples.ROI_pool,
-            cell_type_list=maxatac_model.cell_types,
-            rand_ratio=args.rand_ratio,
-            chroms=args.tchroms,
-            batch_size=args.batch_size,
-            shuffle_cell_type=args.shuffle_cell_type,
-            rev_comp_train=args.rev_comp,
-            inter_fusion=model_config["INTER_FUSION"],
+    if args.get_tfds:
+        data_meta = pd.DataFrame(
+            columns=["train or valid", "tf", "cell_type", "roi_type", "path"]
         )
-    else:
-        train_gen = DataGenerator_v2(
-            sequence=args.sequence,
-            meta_table=maxatac_model.meta_dataframe,
-            roi_pool_atac=train_examples.ROI_pool_ATAC,
-            roi_pool_chip=train_examples.ROI_pool_CHIP,
-            cell_type_list=maxatac_model.cell_types,
-            rand_ratio=args.rand_ratio,
-            chroms=args.tchroms,
-            batch_size=args.batch_size,
-            shuffle_cell_type=args.shuffle_cell_type,
-            rev_comp_train=args.rev_comp,
-            inter_fusion=False,
-            atac_sampling_multiplier=args.ATAC_Sampling_Multiplier,
-            chip_sample_weight_baseline=args.CHIP_Sample_Weight_Baseline,
+        chr_limit = build_chrom_sizes_dict(
+            chrom_sizes_filename=args.chromosome_size_file
         )
+        tf = args.meta_file.split("/")[-1].split(".")[0].split("meta_file_")[1]
 
-    # Create keras.utils.sequence object from training generator
-    seq_train_gen = SeqDataGenerator(batches=args.batch_size, generator=train_gen)
+        print("Getting valid samples")
+        # valid data, only with extended input size
+        data = tensorflow.data.Dataset.from_generator(
+            ValidDataGen(
+                sequence=args.sequence,
+                meta_table=maxatac_model.meta_dataframe,
+                roi_pool_atac=validate_examples.ROI_pool_ATAC,
+                roi_pool_chip=validate_examples.ROI_pool_CHIP,
+                cell_type_list=maxatac_model.cell_types,
+                atac_sampling_multiplier=args.ATAC_Sampling_Multiplier,
+                chip_sample_weight_baseline=args.CHIP_Sample_Weight_Baseline,
+                batch_size=args.batch_size,
+                shuffle=True,
+                chr_limit=chr_limit,
+                flanking_padding_size=512,
+            ),
+            output_signature=(
+                tensorflow.TensorSpec(
+                    shape=(INPUT_LENGTH + 2 * args.flanking_size, INPUT_CHANNELS),
+                    dtype=tensorflow.float32,
+                ),
+                tensorflow.TensorSpec(
+                    shape=(OUTPUT_LENGTH * 2), dtype=tensorflow.float32
+                ),
+                tensorflow.TensorSpec(shape=(), dtype=tensorflow.float32),
+            ),
+        )
+        data_path = "{}/{}/{}".format(
+            args.tfds_path,"valid", tf
+        )
+        data.save(
+            path=data_path,
+            compression="GZIP",
+        )
+        data_meta.loc[data_meta.shape[0]] = ["valid", tf, '.', '.', data_path]
+
+        print("Getting train samples")
+
+        # atac # todo: need to parallize this block into smaller chunks
+        print("ATAC")
+        data = tensorflow.data.Dataset.from_generator(
+            DataGen(
+                sequence=args.sequence,
+                meta_table=maxatac_model.meta_dataframe,
+                roi_pool=train_examples.ROI_pool_ATAC,
+                chip=False,
+                cell_type=None,
+                atac_sampling_multiplier=args.ATAC_Sampling_Multiplier,
+                chip_sample_weight_baseline=args.CHIP_Sample_Weight_Baseline,
+                batch_size=args.batch_size,
+                shuffle=True,
+                chr_limit=chr_limit,
+                flanking_padding_size=args.flanking_size,
+            ),
+            output_signature=(
+                tensorflow.TensorSpec(
+                    shape=(INPUT_LENGTH + 2 * args.flanking_size, INPUT_CHANNELS),
+                    dtype=tensorflow.float32,
+                ),
+                tensorflow.TensorSpec(
+                    shape=(OUTPUT_LENGTH * 2), dtype=tensorflow.float32
+                ),
+                tensorflow.TensorSpec(shape=(), dtype=tensorflow.float32),
+            ),
+        )
+        data_path = (
+            "{}/{}/{}_{}_{}".format(
+                args.tfds_path, "train", tf, '.', "ATAC"
+            )
+        )
+        data.save(
+            path=data_path,
+            compression="GZIP",
+        )
+        data_meta.loc[data_meta.shape[0]] = ["train", tf, '.', 'ATAC', data_path]
+
+        # training dataset, augmented by cell type shuffling, and extended input size
+        for cell_type in maxatac_model.cell_types:
+            # chip
+            print("CHIP",cell_type,sep="\t")
+            data = tensorflow.data.Dataset.from_generator(
+                DataGen(
+                    sequence=args.sequence,
+                    meta_table=maxatac_model.meta_dataframe,
+                    roi_pool=train_examples.ROI_pool_CHIP,
+                    chip=True,
+                    cell_type=cell_type,
+                    atac_sampling_multiplier=args.ATAC_Sampling_Multiplier,
+                    chip_sample_weight_baseline=args.CHIP_Sample_Weight_Baseline,
+                    batch_size=args.batch_size,
+                    shuffle=True,
+                    chr_limit=chr_limit,
+                    flanking_padding_size=512,
+                ),
+                output_signature=(
+                    tensorflow.TensorSpec(
+                        shape=(INPUT_LENGTH + 2 * args.flanking_size, INPUT_CHANNELS),
+                        dtype=tensorflow.float32,
+                    ),
+                    tensorflow.TensorSpec(
+                        shape=(OUTPUT_LENGTH * 2), dtype=tensorflow.float32
+                    ),
+                    tensorflow.TensorSpec(shape=(), dtype=tensorflow.float32),
+                ),
+            )
+            data_path = (
+                "{}/{}/{}_{}_{}".format(
+                    args.tfds_path,"train", tf, cell_type, "CHIP"
+                )
+            )
+            data.save(
+                path=data_path,
+                compression="GZIP",
+            )
+            data_meta.loc[data_meta.shape[0]] = ["train", tf, cell_type, 'CHIP', data_path]
+
+        data_meta.to_csv(args.tfds_meta, header=True, index=False, sep="\t")
+        logging.error("Generate tfds completed!")
+        sys.exit()
+
+    # # Initialize the training generator
+    # if args.ATAC_Sampling_Multiplier == 0:
+    #     train_gen = DataGenerator(
+    #         sequence=args.sequence,
+    #         meta_table=maxatac_model.meta_dataframe,
+    #         roi_pool=train_examples.ROI_pool,
+    #         cell_type_list=maxatac_model.cell_types,
+    #         rand_ratio=args.rand_ratio,
+    #         chroms=args.tchroms,
+    #         batch_size=args.batch_size,
+    #         shuffle_cell_type=args.shuffle_cell_type,
+    #         rev_comp_train=args.rev_comp,
+    #         inter_fusion=model_config["INTER_FUSION"],
+    #     )
+    # else:
+    #     train_gen = DataGenerator_v2(
+    #         sequence=args.sequence,
+    #         meta_table=maxatac_model.meta_dataframe,
+    #         roi_pool_atac=train_examples.ROI_pool_ATAC,
+    #         roi_pool_chip=train_examples.ROI_pool_CHIP,
+    #         cell_type_list=maxatac_model.cell_types,
+    #         rand_ratio=args.rand_ratio,
+    #         chroms=args.tchroms,
+    #         batch_size=args.batch_size,
+    #         shuffle_cell_type=args.shuffle_cell_type,
+    #         rev_comp_train=args.rev_comp,
+    #         inter_fusion=False,
+    #         atac_sampling_multiplier=args.ATAC_Sampling_Multiplier,
+    #         chip_sample_weight_baseline=args.CHIP_Sample_Weight_Baseline,
+    #     )
+    #
+    # # Create keras.utils.sequence object from training generator
+    # seq_train_gen = SeqDataGenerator(batches=args.batch_size, generator=train_gen)
 
     # Specify max_que_size
     if args.max_queue_size:
@@ -269,41 +407,41 @@ def run_training(args):
         queue_size = args.threads * 2
         logging.info("Max Queue Size found: " + str(queue_size))
 
-    # Builds a Enqueuer from a Sequence.
-    # Specify multiprocessing
-    if args.multiprocessing:
-        logging.info("Training with multiprocessing")
-        train_gen_enq = OrderedEnqueuer(seq_train_gen, use_multiprocessing=True)
-        train_gen_enq.start(workers=args.threads, max_queue_size=queue_size)
-
-    else:
-        logging.info("Training without multiprocessing")
-        train_gen_enq = OrderedEnqueuer(seq_train_gen, use_multiprocessing=False)
-        train_gen_enq.start(workers=1, max_queue_size=queue_size)
-
-    enq_train_gen = (
-        train_gen_enq.get()
-    )  # enq_train_gen is now a generator to extract data from the queue
-
-    # validation tfds
-    valid_data = tensorflow.data.Dataset.from_generator(
-        ValidDataGen(
-            sequence=args.sequence,
-            meta_table=maxatac_model.meta_dataframe,
-            roi_pool_atac=validate_examples.ROI_pool_ATAC,
-            roi_pool_chip=validate_examples.ROI_pool_CHIP,
-            cell_type_list=maxatac_model.cell_types,
-            atac_sampling_multiplier=args.ATAC_Sampling_Multiplier,
-            chip_sample_weight_baseline=args.CHIP_Sample_Weight_Baseline,
-            batch_size=args.batch_size,
-            shuffle=True,
-        ),
-        output_signature=(
-            tensorflow.TensorSpec(shape=(1024, 5), dtype=tensorflow.float32),
-            tensorflow.TensorSpec(shape=(32), dtype=tensorflow.float32),
-            tensorflow.TensorSpec(shape=(), dtype=tensorflow.float32),
-        ),
-    )
+    # # Builds a Enqueuer from a Sequence.
+    # # Specify multiprocessing
+    # if args.multiprocessing:
+    #     logging.info("Training with multiprocessing")
+    #     train_gen_enq = OrderedEnqueuer(seq_train_gen, use_multiprocessing=True)
+    #     train_gen_enq.start(workers=args.threads, max_queue_size=queue_size)
+    #
+    # else:
+    #     logging.info("Training without multiprocessing")
+    #     train_gen_enq = OrderedEnqueuer(seq_train_gen, use_multiprocessing=False)
+    #     train_gen_enq.start(workers=1, max_queue_size=queue_size)
+    #
+    # enq_train_gen = (
+    #     train_gen_enq.get()
+    # )  # enq_train_gen is now a generator to extract data from the queue
+    #
+    # # validation tfds
+    # valid_data = tensorflow.data.Dataset.from_generator(
+    #     ValidDataGen(
+    #         sequence=args.sequence,
+    #         meta_table=maxatac_model.meta_dataframe,
+    #         roi_pool_atac=validate_examples.ROI_pool_ATAC,
+    #         roi_pool_chip=validate_examples.ROI_pool_CHIP,
+    #         cell_type_list=maxatac_model.cell_types,
+    #         atac_sampling_multiplier=args.ATAC_Sampling_Multiplier,
+    #         chip_sample_weight_baseline=args.CHIP_Sample_Weight_Baseline,
+    #         batch_size=args.batch_size,
+    #         shuffle=True,
+    #     ),
+    #     output_signature=(
+    #         tensorflow.TensorSpec(shape=(1024, 5), dtype=tensorflow.float32),
+    #         tensorflow.TensorSpec(shape=(32), dtype=tensorflow.float32),
+    #         tensorflow.TensorSpec(shape=(), dtype=tensorflow.float32),
+    #     ),
+    # )
 
     # # Initialize the validation generator
     # if args.ATAC_Sampling_Multiplier == 0:
@@ -351,51 +489,143 @@ def run_training(args):
     #     val_gen_enq.start(workers=1, max_queue_size=queue_size)
     # enq_val_gen = val_gen_enq.get()
 
+
+    # get tfds train and valid object
+
+    data_meta=pd.read_csv(args.tfds_meta,header=0,sep='\t')
+
+    # valid data
+    valid_tfds_file = data_meta[data_meta['train or valid'] == 'valid']['path'].values[0]
+    valid_tfds=tensorflow.data.Dataset.load(valid_tfds_file,compression="GZIP",)
+    valid_data=(valid_tfds
+                .take(
+                    (validate_examples.ROI_pool.shape[0] // args.batch_size)
+                    * args.batch_size
+                )
+                .map(peak_centric_map)
+                .cache()
+                .repeat(args.epochs)
+                .batch(
+                    batch_size=args.batch_size,
+                    num_parallel_calls=tensorflow.data.AUTOTUNE,
+                    drop_remainder=True,
+                    deterministic=False,
+                )
+                .prefetch(tensorflow.data.AUTOTUNE)
+    )
+
+    # train data
+    # atac
+    atac_tfds_file = data_meta[(data_meta['train or valid'] == 'train') & (data_meta['roi_type'] == 'ATAC')]['path'].values[0]
+    atac_tfds=tensorflow.data.Dataset.load(atac_tfds_file,compression="GZIP",)
+
+    # chip
+    chip_tfds = []
+    for cell_type, file_path in data_meta[(data_meta['train or valid'] == 'train') & (data_meta['roi_type'] == 'CHIP')][['cell_type', 'path']].values:
+        if maxatac_model.meta_dataframe[maxatac_model.meta_dataframe["Cell_Line"] == cell_type]['Train_Test_Label'] == "Train":
+            tfds=tensorflow.data.Dataset.load(file_path, compression="GZIP", )
+            data=tfds.map(peak_centric_map).cache().shuffle(tfda.cardinality().numpy()).repeat(args.epochs)
+            chip_tfds.append(data)
+
+
+    _chip_size=len(chip_tfds)
+    _chip_prob=1.0/(1.0+float(args.ATAC_Sampling_Multiplier))
+    _atac_prob=(1.0-_chip_prob)
+
+    train_data_chip=tf.data.Dataset.sample_from_datasets(
+        chip_tfds,
+        weights=[1.0/float(_chip_size)]*_chip_size,
+        stop_on_empty_dataset=False,
+        rerandomize_each_iteration=True
+    )
+
+    train_data = (tf.data.Dataset.sample_from_datasets(
+        [train_data_chip,atac_tfds.map(peak_centric_map).cache().repeat(args.epochs)],
+        weights=[_chip_prob,_atac_prob],
+        stop_on_empty_dataset=False,
+        rerandomize_each_iteration=True
+        )
+        .batch(batch_size= args.batch_size,
+            num_parallel_calls=tensorflow.data.AUTOTUNE,
+            drop_remainder=True,
+            deterministic=False,
+        )
+        .prefetch(tensorflow.data.AUTOTUNE)
+    )
+
     # Fit the model
-    logging.error("Start training the model")
-    if args.ATAC_Sampling_Multiplier == 0:
-        training_history = maxatac_model.nn_model.fit(
-            enq_train_gen,
-            # model.fit() accepts a generator or Sequence that returns (inputs, targets). From the doc, when x is a generator, y should not be specified
-            validation_data=enq_val_gen,
-            steps_per_epoch=args.batches,
-            validation_steps=args.batches,
-            epochs=args.epochs,
-            callbacks=get_callbacks(
-                model_location=maxatac_model.results_location,
-                log_location=maxatac_model.log_location,
-                tensor_board_log_dir=maxatac_model.tensor_board_log_dir,
-                monitor=TRAIN_MONITOR,
-            ),
-            max_queue_size=10,
-            use_multiprocessing=False,
-            workers=1,
-            verbose=1,
-        )
-    else:
-        training_history = maxatac_model.nn_model.fit(
-            enq_train_gen,  # model.fit() accepts a generator or Sequence that returns (inputs, targets). From the doc, when x is a generator, y should not be specified
-            epochs=args.epochs,
-            steps_per_epoch=steps_per_epoch_v2,
-            validation_data=valid_data
-            .take((validate_examples.ROI_pool.shape[0] // args.batch_size)*args.batch_size)
-            .cache()
-            .repeat(args.epochs)
-            .batch(batch_size=args.batch_size, num_parallel_calls=tensorflow.data.AUTOTUNE, drop_remainder=True)
-            .prefetch(tensorflow.data.AUTOTUNE),
-            validation_steps=validate_examples.ROI_pool.shape[0] // args.batch_size,
-            callbacks=get_callbacks(
-                model_location=maxatac_model.results_location,
-                log_location=maxatac_model.log_location,
-                tensor_board_log_dir=maxatac_model.tensor_board_log_dir,
-                monitor=TRAIN_MONITOR,
-                reduce_lr_on_plateau=args.reduce_lr_on_plateau,
-            ),
-            max_queue_size=queue_size,
-            use_multiprocessing=False,
-            workers=1,
-            verbose=1,
-        )
+    training_history = maxatac_model.nn_model.fit(
+        train_data,
+        epochs=args.epochs,
+        steps_per_epoch=steps_per_epoch_v2,
+        validation_data=valid_data,
+        validation_steps=validation_steps_v2,
+        callbacks=get_callbacks(
+            model_location=maxatac_model.results_location,
+            log_location=maxatac_model.log_location,
+            tensor_board_log_dir=maxatac_model.tensor_board_log_dir,
+            monitor=TRAIN_MONITOR,
+            reduce_lr_on_plateau=args.reduce_lr_on_plateau,
+        ),
+        max_queue_size=queue_size,
+        use_multiprocessing=False,
+        workers=1,
+        verbose=1,
+    )
+
+
+    # Fit the model
+    # logging.error("Start training the model")
+    # if args.ATAC_Sampling_Multiplier == 0:
+    #     training_history = maxatac_model.nn_model.fit(
+    #         enq_train_gen,
+    #         # model.fit() accepts a generator or Sequence that returns (inputs, targets). From the doc, when x is a generator, y should not be specified
+    #         validation_data=enq_val_gen,
+    #         steps_per_epoch=args.batches,
+    #         validation_steps=args.batches,
+    #         epochs=args.epochs,
+    #         callbacks=get_callbacks(
+    #             model_location=maxatac_model.results_location,
+    #             log_location=maxatac_model.log_location,
+    #             tensor_board_log_dir=maxatac_model.tensor_board_log_dir,
+    #             monitor=TRAIN_MONITOR,
+    #         ),
+    #         max_queue_size=10,
+    #         use_multiprocessing=False,
+    #         workers=1,
+    #         verbose=1,
+    #     )
+    # else:
+    #     training_history = maxatac_model.nn_model.fit(
+    #         enq_train_gen,  # model.fit() accepts a generator or Sequence that returns (inputs, targets). From the doc, when x is a generator, y should not be specified
+    #         epochs=args.epochs,
+    #         steps_per_epoch=steps_per_epoch_v2,
+    #         validation_data=valid_data.take(
+    #             (validate_examples.ROI_pool.shape[0] // args.batch_size)
+    #             * args.batch_size
+    #         )
+    #         .cache()
+    #         .repeat(args.epochs)
+    #         .batch(
+    #             batch_size=args.batch_size,
+    #             num_parallel_calls=tensorflow.data.AUTOTUNE,
+    #             drop_remainder=True,
+    #         )
+    #         .prefetch(tensorflow.data.AUTOTUNE),
+    #         validation_steps=validate_examples.ROI_pool.shape[0] // args.batch_size,
+    #         callbacks=get_callbacks(
+    #             model_location=maxatac_model.results_location,
+    #             log_location=maxatac_model.log_location,
+    #             tensor_board_log_dir=maxatac_model.tensor_board_log_dir,
+    #             monitor=TRAIN_MONITOR,
+    #             reduce_lr_on_plateau=args.reduce_lr_on_plateau,
+    #         ),
+    #         max_queue_size=queue_size,
+    #         use_multiprocessing=False,
+    #         workers=1,
+    #         verbose=1,
+    #     )
+
 
     logging.error("Plot and save results")
 
