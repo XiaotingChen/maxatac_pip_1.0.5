@@ -156,10 +156,6 @@ def run_training(args):
         maxatac_model.nn_model, maxatac_model.results_location, ext=".pdf"
     )
 
-    ## Save the args and the constants to the output folder
-    # with open(os.path.join(args.output, "user_args.txt"), "w") as f:
-    #    json.dump(args.__dict__, f, indent=2)
-
     logging.error("Import training regions")
 
     # The args.train_roi and the args.validate_roi are the BED files that specify the regions of interest on the genome
@@ -188,7 +184,8 @@ def run_training(args):
 
     if args.ATAC_Sampling_Multiplier != 0:
         steps_per_epoch_v2 = int(
-            train_examples.ROI_pool_CHIP.shape[0]
+            train_examples.ROI_pool_CHIP.shape[0] *
+            maxatac_model.meta_dataframe[maxatac_model.meta_dataframe['Train_Test_Label']=="Train"].shape[0]
             // np.ceil((args.batch_size / (1.0 + float(args.ATAC_Sampling_Multiplier))))
         )
         validation_steps_v2 = int(
@@ -236,7 +233,10 @@ def run_training(args):
 
     logging.error("Initialize data generator")
 
+
+
     if args.get_tfds:
+
         data_meta = pd.DataFrame(
             columns=["train or valid", "tf", "cell_type", "roi_type", "path"]
         )
@@ -522,9 +522,9 @@ def run_training(args):
     # chip
     chip_tfds = []
     for cell_type, file_path in data_meta[(data_meta['train or valid'] == 'train') & (data_meta['roi_type'] == 'CHIP')][['cell_type', 'path']].values:
-        if maxatac_model.meta_dataframe[maxatac_model.meta_dataframe["Cell_Line"] == cell_type]['Train_Test_Label'] == "Train":
-            tfds=tensorflow.data.Dataset.load(file_path, compression="GZIP", )
-            data=tfds.map(peak_centric_map).cache().shuffle(tfda.cardinality().numpy()).repeat(args.epochs)
+        if maxatac_model.meta_dataframe[maxatac_model.meta_dataframe["Cell_Line"] == cell_type]['Train_Test_Label'].values[0] == "Train":
+            tfds = tensorflow.data.Dataset.load(file_path, compression="GZIP", )
+            data = tfds.map(peak_centric_map)
             chip_tfds.append(data)
 
 
@@ -532,14 +532,26 @@ def run_training(args):
     _chip_prob=1.0/(1.0+float(args.ATAC_Sampling_Multiplier))
     _atac_prob=(1.0-_chip_prob)
 
-    train_data_chip=tf.data.Dataset.sample_from_datasets(
-        chip_tfds,
-        weights=[1.0/float(_chip_size)]*_chip_size,
-        stop_on_empty_dataset=False,
-        rerandomize_each_iteration=True
-    )
 
-    train_data = (tf.data.Dataset.sample_from_datasets(
+    # train_data_chip=tensorflow.data.Dataset.sample_from_datasets(
+    #     chip_tfds,
+    #     weights=[1.0/float(_chip_size)]*_chip_size,
+    #     stop_on_empty_dataset=False,
+    #     rerandomize_each_iteration=True
+    # )
+
+    # vstack
+    train_data_chip=chip_tfds[0]
+    if len(chip_tfds)>1:
+        for k in range(1,len(chip_tfds)):
+            train_data_chip=train_data_chip.concatenate(chip_tfds[k])
+
+    train_data_chip.cache().shuffle(train_data_chip.cardinality().numpy()).repeat(args.epochs)
+
+    # re-assign steps_per_epoch_v2 here
+    steps_per_epoch_v2 = train_data_chip.cardinality().numpy() // np.ceil((args.batch_size / (1.0 + float(args.ATAC_Sampling_Multiplier))))
+
+    train_data = (tensorflow.data.Dataset.sample_from_datasets(
         [train_data_chip,atac_tfds.map(peak_centric_map).cache().repeat(args.epochs)],
         weights=[_chip_prob,_atac_prob],
         stop_on_empty_dataset=False,

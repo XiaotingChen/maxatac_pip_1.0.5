@@ -30,6 +30,7 @@ from maxatac.utilities.constants import (
     CHR_POOL_SIZE,
     INPUT_LENGTH,
     INPUT_CHANNELS,
+    OUTPUT_LENGTH,
     BP_ORDER,
     TRAIN_SCALE_SIGNAL,
     BLACKLISTED_REGIONS,
@@ -1782,9 +1783,10 @@ def CHIP_sample_weight_adjustment(CHIP_roi_df):
         ["Chr", "Start", "Stop", "ROI_Type", "Cell_Line", "Weight shrinkage factor"]
     ]
 
-def peak_centric_map(x):
-    return x[512:-512,:]
+def peak_centric_map(x,y,z):
+    return x[512:-512,:],y[16:-16],z
 
-def random_shuffling_map(x):
+def random_shuffling_map(x,y,z):
     shift=np.random.randint(low=0,high=INPUT_LENGTH)
-    return x[shift:shift+INPUT_LENGTH,:]
+    y_shift=np.floor(shift/32)
+    return x[shift:shift+INPUT_LENGTH,:],y[y_shift,y_shift+OUTPUT_LENGTH],z
