@@ -51,33 +51,62 @@ def loss_function(
     y_pred_min=0.0000001,  # 1e-7
     y_pred_max=0.9999999,  # 1 - 1e-7
     y_true_min=-0.5,
+    flanking_truncation_size=0
 ):
+
+    _shape=tf.shape(y_true)
+    if len(_shape)==1:  # per sample
+      _length=_shape[0]
+      y_true=tf.slice(y_true,begin=[flanking_truncation_size],size=[_length-2*flanking_truncation_size])
+      y_pred=tf.slice(y_pred,begin=[flanking_truncation_size],size=[_length-2*flanking_truncation_size])
+    else: # per batch
+      _length=_shape[1]
+      _sample=_shape[0]
+      y_true=tf.slice(y_true,begin=[0,flanking_truncation_size],size=[_sample,_length-2*flanking_truncation_size])
+      y_pred=tf.slice(y_pred,begin=[0,flanking_truncation_size],size=[_sample,_length-2*flanking_truncation_size])
+
     y_true = K.flatten(y_true)
     y_pred = tf.clip_by_value(K.flatten(y_pred), y_pred_min, y_pred_max)
+
     losses = tf.boolean_mask(
         tensor=-y_true * K.log(y_pred) - (1 - y_true) * K.log(1 - y_pred),
         mask=K.greater_equal(y_true, y_true_min),
     )
     return tf.reduce_mean(input_tensor=losses)
 
+
+
 class loss_function_focal_class(tf.keras.losses.Loss):
 
-    def __init__(self,name='focal_loss',reduction=tf.keras.losses.Reduction.AUTO,alpha=0.25,gamma=2.0,apply_class_balancing=False):
+    def __init__(self,name='focal_loss',reduction=tf.keras.losses.Reduction.AUTO,alpha=0.25,gamma=2.0,apply_class_balancing=False,flanking_truncation_size=0):
         super(loss_function_focal_class,self).__init__(name=name,reduction=reduction)
         self.alpha=alpha
         self.gamma=gamma
         self.apply_class_balancing=apply_class_balancing
-        self.y_pred_min = 0.0000001,  # 1e-7
-        self.y_pred_max = 0.9999999,  # 1 - 1e-7
-        self.y_true_min = -0.5,
+        self.y_pred_min = 0.0000001  # 1e-7
+        self.y_pred_max = 0.9999999  # 1 - 1e-7
+        self.y_true_min = -0.5
+        self.flanking_truncation_size=flanking_truncation_size
+
 
     def call(self, y_true, y_pred):
-        _shape = tf.shape(y_true)[0]
+        _shape = tf.shape(y_true)
+        if len(_shape) == 1:  # per sample
+            _length = _shape[0]
+            y_true = tf.slice(y_true, begin=[self.flanking_truncation_size], size=[_length - 2 * self.flanking_truncation_size])
+            y_pred = tf.slice(y_pred, begin=[self.flanking_truncation_size], size=[_length - 2 * self.flanking_truncation_size])
+        else:  # per batch
+            _length = _shape[1]
+            _sample = _shape[0]
+            y_true = tf.slice(y_true, begin=[0, self.flanking_truncation_size], size=[_sample, _length - 2 * self.flanking_truncation_size])
+            y_pred = tf.slice(y_pred, begin=[0, self.flanking_truncation_size], size=[_sample, _length - 2 * self.flanking_truncation_size])
+
+
         y_true = K.flatten(y_true)
         y_pred = tf.clip_by_value(K.flatten(y_pred), self.y_pred_min, self.y_pred_max)
 
-        _batch_size=y_true.shape[0]
-        _alpha_weight=np.ones(_batch_size)*self.alpha*y_true + np.ones(_batch_size)*(1-self.alpha)*(np.ones(_batch_size)-y_true)
+        _size=y_true.shape[0]
+        _alpha_weight=np.ones(_size)*self.alpha*y_true + np.ones(_size)*(1-self.alpha)*(np.ones(_size)-y_true)
 
         if self.apply_class_balancing:
             losses = tf.boolean_mask(
@@ -90,7 +119,7 @@ class loss_function_focal_class(tf.keras.losses.Loss):
                 mask=K.greater_equal(y_true, self.y_true_min),
             )
         losses = tf.cast(losses,tf.float32)
-        losses = tf.reshape(losses, (_shape, -1))
+        losses = tf.reshape(losses, (_shape[0], -1))
         return tf.reduce_mean(input_tensor=losses,axis=-1)
 
     def get_config(self):
@@ -135,7 +164,19 @@ def spearman(y_true, y_pred):
     )
 
 
-def dice_coef(y_true, y_pred, y_true_min=-0.5, unknown_coef=10):
+def dice_coef(y_true, y_pred, y_true_min=-0.5, unknown_coef=10, flanking_truncation_size=0):
+
+    _shape = tf.shape(y_true)
+    if len(_shape) == 1:  # per sample
+        _length = _shape[0]
+        y_true = tf.slice(y_true, begin=[flanking_truncation_size], size=[_length - 2 * flanking_truncation_size])
+        y_pred = tf.slice(y_pred, begin=[flanking_truncation_size], size=[_length - 2 * flanking_truncation_size])
+    else:  # per batch
+        _length = _shape[1]
+        _sample = _shape[0]
+        y_true = tf.slice(y_true, begin=[0, flanking_truncation_size], size=[_sample, _length - 2 * flanking_truncation_size])
+        y_pred = tf.slice(y_pred, begin=[0, flanking_truncation_size], size=[_sample, _length - 2 * flanking_truncation_size])
+
     y_true = K.flatten(y_true)
     y_pred = K.flatten(y_pred)
     mask = K.cast(K.greater_equal(y_true, y_true_min), dtype="float32")

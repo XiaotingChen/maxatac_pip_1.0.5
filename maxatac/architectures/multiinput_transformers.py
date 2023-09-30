@@ -772,8 +772,10 @@ def get_multiinput_transformer(
     if model_config["FOCAL_LOSS"]==False:
         model.compile(
             optimizer,
-            loss=loss_function,
-            metrics=[dice_coef],
+            loss=lambda x,y:loss_function(flanking_truncation_size=model_config["LOSS_FLANKING_TRUNCATION_SIZE"]),
+            metrics=[
+                lambda x,y:dice_coef(flanking_truncation_size=model_config["LOSS_FLANKING_TRUNCATION_SIZE"])
+            ],
         )
     else:
         model.compile(
@@ -781,9 +783,12 @@ def get_multiinput_transformer(
             loss=loss_function_focal_class(
                 alpha=model_config["FOCAL_LOSS_ALPHA"],
                 gamma=model_config["FOCAL_LOSS_GAMMA"],
-                apply_class_balancing=model_config["FOCAL_LOSS_APPLY_ALPHA"]
+                apply_class_balancing=model_config["FOCAL_LOSS_APPLY_ALPHA"],
+                flanking_truncation_size=model_config["LOSS_FLANKING_TRUNCATION_SIZE"],
             ),
-            metrics=[dice_coef],
+            metrics=[
+                lambda x,y:dice_coef(flanking_truncation_size=model_config["LOSS_FLANKING_TRUNCATION_SIZE"])
+            ],
         )
 
     logging.debug("Model compiled")

@@ -994,6 +994,16 @@ def get_parser():
         default=512,
         help="Flanking sequence size for shifting",
     )
+
+    train_parser.add_argument(
+        "--LOSS_FLANKING_TRUNCATION_SIZE",
+        dest="LOSS_FLANKING_TRUNCATION_SIZE",
+        action="store",
+        type=int,
+        default=0,
+        help="Ouput flanking size to truncate in loss calculation",
+    )
+
     #############################################
     # Pretrain parser
     #############################################

@@ -136,6 +136,8 @@ def run_training(args):
     model_config["ELASTIC_L1"] = args.ELASTIC_L1
     model_config["ELASTIC_L2"] = args.ELASTIC_L2
 
+    model_config["LOSS_FLANKING_TRUNCATION_SIZE"] = args.LOSS_FLANKING_TRUNCATION_SIZE
+
     # Initialize the model with the architecture of choice
     maxatac_model = MaxATACModel(
         arch=args.arch,
