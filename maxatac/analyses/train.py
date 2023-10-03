@@ -126,6 +126,10 @@ def run_training(args):
         "COSINEDECAYRESTARTS_FIRST_DECAY_STEPS"
     ] = args.COSINEDECAYRESTARTS_FIRST_DECAY_STEPS
 
+    model_config["COSINEDECAY"] = args.COSINEDECAY
+    model_config["COSINEDECAYALPHA"] = args.COSINEDECAYALPHA
+    model_config["COSINEDECAYDECAYSTEPS"] = args.COSINEDECAYDECAYSTEPS
+
     model_config["FOCAL_LOSS_ALPHA"] = args.FOCAL_LOSS_ALPHA
     model_config["FOCAL_LOSS_GAMMA"] = args.FOCAL_LOSS_GAMMA
     model_config["FOCAL_LOSS"] = args.FOCAL_LOSS

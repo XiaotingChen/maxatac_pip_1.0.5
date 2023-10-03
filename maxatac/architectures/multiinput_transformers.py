@@ -34,6 +34,7 @@ with Mute():
         KERNEL_INITIALIZER,
         INPUT_LENGTH,
         INPUT_CHANNELS,
+        DNA_INPUT_CHANNELS,
         INPUT_FILTERS,
         INPUT_KERNEL_SIZE,
         INPUT_ACTIVATION,
@@ -60,6 +61,10 @@ with Mute():
         DEFAULT_COSINEDECAYRESTARTS_T_MUL,
         DEFAULT_COSINEDECAYRESTARTS_M_MUL,
         DEFAULT_COSINEDECAYRESTARTS_INITIAL_LR_MULTIPLIER,
+        DEFAULT_COSINEDECAY_DECAY_STEPS,
+        DEFAULT_COSINEDECAY_ALPHA,
+        DEFAULT_COSINEDECAY_WARMUP_TARGET_MULTIPLIER,
+        DEFAULT_COSINEDECAY_WARMUP_STEPS,
     )
 
     from maxatac.architectures.dcnn import (
@@ -118,7 +123,7 @@ def get_conv_block(
     pre_activation=False,
     regularization=False,
     l1=0.0,
-    l2=0.0
+    l2=0.0,
 ):
     """
     Feed the input through some conv layers.
@@ -147,7 +152,9 @@ def get_conv_block(
                 strides=conv_block_config["stride"],
                 activation="linear",
                 name=base_name + f"_conv_layer_{l+1}",
-                kernel_regularizer=tf.keras.regularizers.L1L2(l1, l2) if regularization else None
+                kernel_regularizer=tf.keras.regularizers.L1L2(l1, l2)
+                if regularization
+                else None,
             )(inbound_layer)
         else:
             inbound_layer = Conv1D(
@@ -399,14 +406,12 @@ def get_multiinput_transformer(
     logging.debug("Building Dilated CNN model")
 
     # Current there are two inputs: one for the genome sequence, one for the ATAC-seq signal
-    _input=Input(shape=(input_length, 5),)
+    _input = Input(
+        shape=(input_length, INPUT_CHANNELS),
+    )
 
-    genome_input = tf.keras.layers.Lambda(
-        lambda x: x[:, :, :4], name="genome"
-    )(_input)
-    atacseq_input = tf.keras.layers.Lambda(
-        lambda x: x[:, :, 4:], name="atac"
-    )(_input)
+    genome_input = tf.keras.layers.Lambda(lambda x: x[:, :, :DNA_INPUT_CHANNELS], name="genome")(_input)
+    atacseq_input = tf.keras.layers.Lambda(lambda x: x[:, :, DNA_INPUT_CHANNELS:], name="atac")(_input)
 
     # The current feature dim to the transformer is 64
     # Using 2 inputs, each input will be transformed to feature dim of 32
@@ -545,7 +550,11 @@ def get_multiinput_transformer(
         use_residual=model_config["CONV_TOWER_CONFIGS_FUSION"]["use_residual"],
         suppress_activation=True,
         pre_activation=True,
-        residual_connection_dropout_rate=model_config["RESIDUAL_CONNECTION_DROPOUT_RATE"] if model_config["SUPPRESS_DROPOUT"]==False else None,
+        residual_connection_dropout_rate=model_config[
+            "RESIDUAL_CONNECTION_DROPOUT_RATE"
+        ]
+        if model_config["SUPPRESS_DROPOUT"] == False
+        else None,
     )
     atacseq_layer = get_conv_tower(
         atacseq_layer,
@@ -555,7 +564,11 @@ def get_multiinput_transformer(
         use_residual=model_config["CONV_TOWER_CONFIGS_FUSION"]["use_residual"],
         suppress_activation=True,
         pre_activation=True,
-        residual_connection_dropout_rate=model_config["RESIDUAL_CONNECTION_DROPOUT_RATE"] if model_config["SUPPRESS_DROPOUT"]==False else None,
+        residual_connection_dropout_rate=model_config[
+            "RESIDUAL_CONNECTION_DROPOUT_RATE"
+        ]
+        if model_config["SUPPRESS_DROPOUT"] == False
+        else None,
     )
 
     # genome_layer and atacseq_layer now should have shape (batch, seq_len, mha_embed_dim // 2)
@@ -705,6 +718,16 @@ def get_multiinput_transformer(
             m_mul=DEFAULT_COSINEDECAYRESTARTS_M_MUL,
             alpha=DEFAULT_COSINEDECAYRESTARTS_ALPHA,
         )
+    elif model_config["COSINEDECAY"]:
+        lr_schedule = tf.keras.optimizers.schedules.CosineDecay(
+            initial_learning_rate=model_config["INITIAL_LEARNING_RATE"],
+            decay_steps=model_config["COSINEDECAYDECAYSTEPS"],
+            alpha=model_config["COSINEDECAYALPHA"],
+            name=None,
+            warmup_target=model_config["INITIAL_LEARNING_RATE"]
+            * DEFAULT_COSINEDECAY_WARMUP_TARGET_MULTIPLIER,
+            warmup_steps=DEFAULT_COSINEDECAY_WARMUP_STEPS,
+        )
     else:
         lr_schedule = (
             model_config["INITIAL_LEARNING_RATE"]
@@ -769,12 +792,22 @@ def get_multiinput_transformer(
             # weight_decay=adam_decay,
         )
 
-    if model_config["FOCAL_LOSS"]==False:
+    if model_config["FOCAL_LOSS"] == False:
         model.compile(
             optimizer,
-            loss=lambda x,y:loss_function(flanking_truncation_size=model_config["LOSS_FLANKING_TRUNCATION_SIZE"]),
+            loss=lambda x, y: loss_function(
+                y_true=x,
+                y_pred=y,
+                flanking_truncation_size=model_config["LOSS_FLANKING_TRUNCATION_SIZE"],
+            ),
             metrics=[
-                lambda x,y:dice_coef(flanking_truncation_size=model_config["LOSS_FLANKING_TRUNCATION_SIZE"])
+                lambda x, y: dice_coef(
+                    y_true=x,
+                    y_pred=y,
+                    flanking_truncation_size=model_config[
+                        "LOSS_FLANKING_TRUNCATION_SIZE"
+                    ],
+                )
             ],
         )
     else:
@@ -787,7 +820,13 @@ def get_multiinput_transformer(
                 flanking_truncation_size=model_config["LOSS_FLANKING_TRUNCATION_SIZE"],
             ),
             metrics=[
-                lambda x,y:dice_coef(flanking_truncation_size=model_config["LOSS_FLANKING_TRUNCATION_SIZE"])
+                lambda x, y: dice_coef(
+                    y_true=x,
+                    y_pred=y,
+                    flanking_truncation_size=model_config[
+                        "LOSS_FLANKING_TRUNCATION_SIZE"
+                    ],
+                )
             ],
         )
 

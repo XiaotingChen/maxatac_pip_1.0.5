@@ -804,6 +804,31 @@ def get_parser():
     )
 
     train_parser.add_argument(
+        "--COSINEDECAY",
+        dest="COSINEDECAY",
+        action="store_true",
+        default=False,
+        help="Whether enables COSINEDECAY scheduler during training.",
+    )
+    train_parser.add_argument(
+        "--COSINEDECAYALPHA",
+        dest="COSINEDECAYALPHA",
+        action="store",
+        type=float,
+        default=0.05,
+        help="Adjust COSINEDECAY scheduler's alpha value.",
+    )
+
+    train_parser.add_argument(
+        "--COSINEDECAYDECAYSTEPS",
+        dest="COSINEDECAYDECAYSTEPS",
+        action="store",
+        type=int,
+        default=10000,
+        help="Adjust COSINEDECAY scheduler's decay_steps value.",
+    )
+
+    train_parser.add_argument(
         "--USING_BASENJI_KERNEL",
         dest="USING_BASENJI_KERNEL",
         action="store_true",
