@@ -51,19 +51,34 @@ def loss_function(
     y_pred_min=0.0000001,  # 1e-7
     y_pred_max=0.9999999,  # 1 - 1e-7
     y_true_min=-0.5,
-    flanking_truncation_size=0
+    flanking_truncation_size=0,
 ):
-
-    _shape=tf.shape(y_true)
-    if len(_shape)==1:  # per sample
-      _length=_shape[0]
-      y_true=tf.slice(y_true,begin=[flanking_truncation_size],size=[_length-2*flanking_truncation_size])
-      y_pred=tf.slice(y_pred,begin=[flanking_truncation_size],size=[_length-2*flanking_truncation_size])
-    else: # per batch
-      _length=_shape[1]
-      _sample=_shape[0]
-      y_true=tf.slice(y_true,begin=[0,flanking_truncation_size],size=[_sample,_length-2*flanking_truncation_size])
-      y_pred=tf.slice(y_pred,begin=[0,flanking_truncation_size],size=[_sample,_length-2*flanking_truncation_size])
+    _shape = tf.shape(y_true)
+    if len(_shape) == 1:  # per sample
+        _length = _shape[0]
+        y_true = tf.slice(
+            y_true,
+            begin=[flanking_truncation_size],
+            size=[_length - 2 * flanking_truncation_size],
+        )
+        y_pred = tf.slice(
+            y_pred,
+            begin=[flanking_truncation_size],
+            size=[_length - 2 * flanking_truncation_size],
+        )
+    else:  # per batch
+        _length = _shape[1]
+        _sample = _shape[0]
+        y_true = tf.slice(
+            y_true,
+            begin=[0, flanking_truncation_size],
+            size=[_sample, _length - 2 * flanking_truncation_size],
+        )
+        y_pred = tf.slice(
+            y_pred,
+            begin=[0, flanking_truncation_size],
+            size=[_sample, _length - 2 * flanking_truncation_size],
+        )
 
     y_true = K.flatten(y_true)
     y_pred = tf.clip_by_value(K.flatten(y_pred), y_pred_min, y_pred_max)
@@ -75,52 +90,82 @@ def loss_function(
     return tf.reduce_mean(input_tensor=losses)
 
 
-
 class loss_function_focal_class(tf.keras.losses.Loss):
-
-    def __init__(self,name='focal_loss',reduction=tf.keras.losses.Reduction.AUTO,alpha=0.25,gamma=2.0,apply_class_balancing=False,flanking_truncation_size=0):
-        super(loss_function_focal_class,self).__init__(name=name,reduction=reduction)
-        self.alpha=alpha
-        self.gamma=gamma
-        self.apply_class_balancing=apply_class_balancing
+    def __init__(
+        self,
+        name="focal_loss",
+        reduction=tf.keras.losses.Reduction.AUTO,
+        alpha=0.25,
+        gamma=2.0,
+        apply_class_balancing=False,
+        flanking_truncation_size=0,
+    ):
+        super(loss_function_focal_class, self).__init__(name=name, reduction=reduction)
+        self.alpha = alpha
+        self.gamma = gamma
+        self.apply_class_balancing = apply_class_balancing
         self.y_pred_min = 0.0000001  # 1e-7
         self.y_pred_max = 0.9999999  # 1 - 1e-7
         self.y_true_min = -0.5
-        self.flanking_truncation_size=flanking_truncation_size
-
+        self.flanking_truncation_size = flanking_truncation_size
 
     def call(self, y_true, y_pred):
         _shape = tf.shape(y_true)
         if len(_shape) == 1:  # per sample
             _length = _shape[0]
-            y_true = tf.slice(y_true, begin=[self.flanking_truncation_size], size=[_length - 2 * self.flanking_truncation_size])
-            y_pred = tf.slice(y_pred, begin=[self.flanking_truncation_size], size=[_length - 2 * self.flanking_truncation_size])
+            y_true = tf.slice(
+                y_true,
+                begin=[self.flanking_truncation_size],
+                size=[_length - 2 * self.flanking_truncation_size],
+            )
+            y_pred = tf.slice(
+                y_pred,
+                begin=[self.flanking_truncation_size],
+                size=[_length - 2 * self.flanking_truncation_size],
+            )
         else:  # per batch
             _length = _shape[1]
             _sample = _shape[0]
-            y_true = tf.slice(y_true, begin=[0, self.flanking_truncation_size], size=[_sample, _length - 2 * self.flanking_truncation_size])
-            y_pred = tf.slice(y_pred, begin=[0, self.flanking_truncation_size], size=[_sample, _length - 2 * self.flanking_truncation_size])
-
+            y_true = tf.slice(
+                y_true,
+                begin=[0, self.flanking_truncation_size],
+                size=[_sample, _length - 2 * self.flanking_truncation_size],
+            )
+            y_pred = tf.slice(
+                y_pred,
+                begin=[0, self.flanking_truncation_size],
+                size=[_sample, _length - 2 * self.flanking_truncation_size],
+            )
 
         y_true = K.flatten(y_true)
         y_pred = tf.clip_by_value(K.flatten(y_pred), self.y_pred_min, self.y_pred_max)
 
-        _size=y_true.shape[0]
-        _alpha_weight=np.ones(_size)*self.alpha*y_true + np.ones(_size)*(1-self.alpha)*(np.ones(_size)-y_true)
+        _size = y_true.shape[0]
+        _alpha_weight = np.ones(_size) * self.alpha * y_true + np.ones(_size) * (
+            1 - self.alpha
+        ) * (np.ones(_size) - y_true)
 
         if self.apply_class_balancing:
             losses = tf.boolean_mask(
-                tensor=-y_true * K.log(y_pred) * K.pow(1-y_pred, self.gamma) * _alpha_weight - (1 - y_true) * K.log(1 - y_pred) * K.pow(y_pred, self.gamma) * _alpha_weight,
+                tensor=-y_true
+                * K.log(y_pred)
+                * K.pow(1 - y_pred, self.gamma)
+                * _alpha_weight
+                - (1 - y_true)
+                * K.log(1 - y_pred)
+                * K.pow(y_pred, self.gamma)
+                * _alpha_weight,
                 mask=K.greater_equal(y_true, self.y_true_min),
             )
         else:
             losses = tf.boolean_mask(
-                tensor=-y_true * K.log(y_pred) * K.pow(1 - y_pred, self.gamma) - (1 - y_true) * K.log(1 - y_pred) * K.pow(y_pred, self.gamma),
+                tensor=-y_true * K.log(y_pred) * K.pow(1 - y_pred, self.gamma)
+                - (1 - y_true) * K.log(1 - y_pred) * K.pow(y_pred, self.gamma),
                 mask=K.greater_equal(y_true, self.y_true_min),
             )
-        losses = tf.cast(losses,tf.float32)
+        losses = tf.cast(losses, tf.float32)
         losses = tf.reshape(losses, (_shape[0], -1))
-        return tf.reduce_mean(input_tensor=losses,axis=-1)
+        return tf.reduce_mean(input_tensor=losses, axis=-1)
 
     def get_config(self):
         """Returns the config dictionary for a `Loss` instance."""
@@ -164,18 +209,35 @@ def spearman(y_true, y_pred):
     )
 
 
-def dice_coef(y_true, y_pred, y_true_min=-0.5, unknown_coef=10, flanking_truncation_size=0):
-
+def dice_coef(
+    y_true, y_pred, y_true_min=-0.5, unknown_coef=10, flanking_truncation_size=0
+):
     _shape = tf.shape(y_true)
     if len(_shape) == 1:  # per sample
         _length = _shape[0]
-        y_true = tf.slice(y_true, begin=[flanking_truncation_size], size=[_length - 2 * flanking_truncation_size])
-        y_pred = tf.slice(y_pred, begin=[flanking_truncation_size], size=[_length - 2 * flanking_truncation_size])
+        y_true = tf.slice(
+            y_true,
+            begin=[flanking_truncation_size],
+            size=[_length - 2 * flanking_truncation_size],
+        )
+        y_pred = tf.slice(
+            y_pred,
+            begin=[flanking_truncation_size],
+            size=[_length - 2 * flanking_truncation_size],
+        )
     else:  # per batch
         _length = _shape[1]
         _sample = _shape[0]
-        y_true = tf.slice(y_true, begin=[0, flanking_truncation_size], size=[_sample, _length - 2 * flanking_truncation_size])
-        y_pred = tf.slice(y_pred, begin=[0, flanking_truncation_size], size=[_sample, _length - 2 * flanking_truncation_size])
+        y_true = tf.slice(
+            y_true,
+            begin=[0, flanking_truncation_size],
+            size=[_sample, _length - 2 * flanking_truncation_size],
+        )
+        y_pred = tf.slice(
+            y_pred,
+            begin=[0, flanking_truncation_size],
+            size=[_sample, _length - 2 * flanking_truncation_size],
+        )
 
     y_true = K.flatten(y_true)
     y_pred = K.flatten(y_pred)
@@ -184,6 +246,121 @@ def dice_coef(y_true, y_pred, y_true_min=-0.5, unknown_coef=10, flanking_truncat
     numerator = 2.0 * intersection + unknown_coef
     denominator = K.sum(y_true * mask) + K.sum(y_pred * mask) + unknown_coef
     return numerator / denominator
+
+
+class dice_coef_class(tf.keras.metrics.Metric):
+    def __init__(
+        self,
+        name="dice_coef",
+        y_true_min=-0.5,
+        unknown_coef=10,
+        flanking_truncation_size=0,
+        **kwargs
+    ):
+        super(dice_coef, self).__init__(name=name, **kwargs)
+        self.y_true_min = y_true_min
+        self.unknown_coef = unknown_coef
+        self.flanking_truncation_size = flanking_truncation_size
+        self.dice_coef = self.add_weight(name="dice_coef", initializer="zeros")
+
+    def update_state(self, y_true, y_pred, sample_weight=None):
+        _shape = tf.shape(y_true)
+        if len(_shape) == 1:  # per sample
+            _length = _shape[0]
+            y_true = tf.slice(
+                y_true,
+                begin=[self.flanking_truncation_size],
+                size=[_length - 2 * self.flanking_truncation_size],
+            )
+            y_pred = tf.slice(
+                y_pred,
+                begin=[self.flanking_truncation_size],
+                size=[_length - 2 * self.flanking_truncation_size],
+            )
+        else:  # per batch
+            _length = _shape[1]
+            _sample = _shape[0]
+            y_true = tf.slice(
+                y_true,
+                begin=[0, self.flanking_truncation_size],
+                size=[_sample, _length - 2 * self.flanking_truncation_size],
+            )
+            y_pred = tf.slice(
+                y_pred,
+                begin=[0, self.flanking_truncation_size],
+                size=[_sample, _length - 2 * self.flanking_truncation_size],
+            )
+
+        y_true = K.flatten(y_true)
+        y_pred = K.flatten(y_pred)
+        mask = K.cast(K.greater_equal(y_true, self.y_true_min), dtype="float32")
+        intersection = K.sum(y_true * y_pred * mask)
+        numerator = 2.0 * intersection + self.unknown_coef
+        denominator = K.sum(y_true * mask) + K.sum(y_pred * mask) + self.unknown_coef
+        self.dice_coef.assign(
+            numerator / denominator
+        )  # use tf.assign along with tf.keras.metrics.MeanMetricWrapper
+
+    def result(self):
+        return self.dice_coef
+
+    def reset_state(self):
+        self.dice_coef.assign(0.0)
+
+
+class dice_coef(tf.keras.metrics.Metric):
+    def __init__(
+        self,
+        name="dice_coef",
+        y_true_min=-0.5,
+        unknown_coef=10,
+        flanking_truncation_size=0,
+        **kwargs
+    ):
+        super(BinaryTruePositives, self).__init__(name=name, **kwargs)
+        self.y_true_min = y_true_min
+        self.unknown_coef = unknown_coef
+        self.flanking_truncation_size = flanking_truncation_size
+        self.dice_coef = self.add_weight(name="dice_coef", initializer="zeros")
+
+    def update_state(self, y_true, y_pred, sample_weight=None):
+        _shape = tf.shape(y_true)
+        if len(_shape) == 1:  # per sample
+            _length = _shape[0]
+            y_true = tf.slice(
+                y_true,
+                begin=[self.flanking_truncation_size],
+                size=[_length - 2 * self.flanking_truncation_size],
+            )
+            y_pred = tf.slice(
+                y_pred,
+                begin=[self.flanking_truncation_size],
+                size=[_length - 2 * self.flanking_truncation_size],
+            )
+        else:  # per batch
+            _length = _shape[1]
+            _sample = _shape[0]
+            y_true = tf.slice(
+                y_true,
+                begin=[0, self.flanking_truncation_size],
+                size=[_sample, _length - 2 * self.flanking_truncation_size],
+            )
+            y_pred = tf.slice(
+                y_pred,
+                begin=[0, self.flanking_truncation_size],
+                size=[_sample, _length - 2 * self.flanking_truncation_size],
+            )
+
+        y_true = K.flatten(y_true)
+        y_pred = K.flatten(y_pred)
+        mask = K.cast(K.greater_equal(y_true, self.y_true_min), dtype="float32")
+        intersection = K.sum(y_true * y_pred * mask)
+        numerator = 2.0 * intersection + self.unknown_coef
+        denominator = K.sum(y_true * mask) + K.sum(y_pred * mask) + unknown_coef
+        self.dice_coef.assign_add(numerator / denominator)
+
+    def result(self):
+        return self.dice_coef
 
 
 def tp(y_true, y_pred, pred_thresh=0.5):
@@ -289,14 +466,13 @@ def get_multihead_attention(
     inbound_layer = tf.keras.layers.Add()([inbound_layer, layer_norm])
     return inbound_layer
 
-def get_residual_layer(
-    inbound_layer,
-    transformed_layer,
-    activation
-):
+
+def get_residual_layer(inbound_layer, transformed_layer, activation):
     return tf.keras.layers.Activation(activation)(
-        tf.keras.layers.Add()([inbound_layer,transformed_layer])
+        tf.keras.layers.Add()([inbound_layer, transformed_layer])
     )
+
+
 def get_layer(
     inbound_layer,
     filters,
@@ -316,7 +492,7 @@ def get_layer(
     focal_initializing=False,
     regularization=False,
     l1=0.0,
-    l2=0.0
+    l2=0.0,
 ):
     """
     Returns new layer without max pooling. If concat_layer,
@@ -337,7 +513,9 @@ def get_layer(
                 kernel_initializer=kernel_initializer,
                 use_bias=use_bias,
                 name=name,
-                kernel_regularizer=tf.keras.regularizers.L1L2(l1,l2) if regularization else None
+                kernel_regularizer=tf.keras.regularizers.L1L2(l1, l2)
+                if regularization
+                else None,
             )(inbound_layer)
             inbound_layer = BatchNormalization()(inbound_layer)
         else:
@@ -351,7 +529,9 @@ def get_layer(
                     kernel_initializer=kernel_initializer,
                     use_bias=use_bias,
                     name=name,
-                    kernel_regularizer=tf.keras.regularizers.L1L2(l1, l2) if regularization else None
+                    kernel_regularizer=tf.keras.regularizers.L1L2(l1, l2)
+                    if regularization
+                    else None,
                 )(inbound_layer)
             else:
                 inbound_layer = Conv1D(
@@ -362,9 +542,11 @@ def get_layer(
                     dilation_rate=dilation_rate,
                     kernel_initializer=kernel_initializer,
                     use_bias=True,
-                    bias_initializer=tf.keras.initializers.Constant(-2), #
+                    bias_initializer=tf.keras.initializers.Constant(-2),  #
                     name=name,
-                    kernel_regularizer=tf.keras.regularizers.L1L2(l1, l2) if regularization else None
+                    kernel_regularizer=tf.keras.regularizers.L1L2(l1, l2)
+                    if regularization
+                    else None,
                 )(inbound_layer)
             if not skip_batch_norm:
                 inbound_layer = BatchNormalization()(inbound_layer)

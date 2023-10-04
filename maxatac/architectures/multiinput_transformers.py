@@ -71,11 +71,13 @@ with Mute():
         loss_function,
         loss_function_focal_class,
         dice_coef,
+        dice_coef_class,
         get_layer,
         get_residual_layer,
     )
     from maxatac.architectures.attention_module_TF import TransformerBlock
     import tensorflow_addons as tfa
+    from tensorflow.keras.metrics import MeanMetricWrapper
 
 
 def get_inception_block(inbound_layer, inception_branches, base_name):
@@ -410,8 +412,12 @@ def get_multiinput_transformer(
         shape=(input_length, INPUT_CHANNELS),
     )
 
-    genome_input = tf.keras.layers.Lambda(lambda x: x[:, :, :DNA_INPUT_CHANNELS], name="genome")(_input)
-    atacseq_input = tf.keras.layers.Lambda(lambda x: x[:, :, DNA_INPUT_CHANNELS:], name="atac")(_input)
+    genome_input = tf.keras.layers.Lambda(
+        lambda x: x[:, :, :DNA_INPUT_CHANNELS], name="genome"
+    )(_input)
+    atacseq_input = tf.keras.layers.Lambda(
+        lambda x: x[:, :, DNA_INPUT_CHANNELS:], name="atac"
+    )(_input)
 
     # The current feature dim to the transformer is 64
     # Using 2 inputs, each input will be transformed to feature dim of 32
@@ -801,12 +807,13 @@ def get_multiinput_transformer(
                 flanking_truncation_size=model_config["LOSS_FLANKING_TRUNCATION_SIZE"],
             ),
             metrics=[
-                lambda x, y: dice_coef(
-                    y_true=x,
-                    y_pred=y,
-                    flanking_truncation_size=model_config[
-                        "LOSS_FLANKING_TRUNCATION_SIZE"
-                    ],
+                MeanMetricWrapper(
+                    dice_coef_class(
+                        flanking_truncation_size=model_config[
+                            "LOSS_FLANKING_TRUNCATION_SIZE"
+                        ]
+                    ),
+                    name="dice_coef",
                 )
             ],
         )
@@ -820,12 +827,13 @@ def get_multiinput_transformer(
                 flanking_truncation_size=model_config["LOSS_FLANKING_TRUNCATION_SIZE"],
             ),
             metrics=[
-                lambda x, y: dice_coef(
-                    y_true=x,
-                    y_pred=y,
-                    flanking_truncation_size=model_config[
-                        "LOSS_FLANKING_TRUNCATION_SIZE"
-                    ],
+                MeanMetricWrapper(
+                    dice_coef_class(
+                        flanking_truncation_size=model_config[
+                            "LOSS_FLANKING_TRUNCATION_SIZE"
+                        ]
+                    ),
+                    name="dice_coef",
                 )
             ],
         )
