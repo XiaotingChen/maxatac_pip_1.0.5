@@ -36,7 +36,7 @@ with Mute():
         ValidDataGen,
         DataGen,
         peak_centric_map,
-        random_shuffling_map
+        random_shuffling_map,
     )
     from maxatac.utilities.plot import (
         export_binary_metrics,
@@ -190,8 +190,10 @@ def run_training(args):
 
     if args.ATAC_Sampling_Multiplier != 0:
         steps_per_epoch_v2 = int(
-            train_examples.ROI_pool_CHIP.shape[0] *
-            maxatac_model.meta_dataframe[maxatac_model.meta_dataframe['Train_Test_Label']=="Train"].shape[0]
+            train_examples.ROI_pool_CHIP.shape[0]
+            * maxatac_model.meta_dataframe[
+                maxatac_model.meta_dataframe["Train_Test_Label"] == "Train"
+            ].shape[0]
             // np.ceil((args.batch_size / (1.0 + float(args.ATAC_Sampling_Multiplier))))
         )
         validation_steps_v2 = int(
@@ -239,10 +241,7 @@ def run_training(args):
 
     logging.error("Initialize data generator")
 
-
-
     if args.get_tfds:
-
         data_meta = pd.DataFrame(
             columns=["train or valid", "tf", "cell_type", "roi_type", "path"]
         )
@@ -278,14 +277,12 @@ def run_training(args):
                 tensorflow.TensorSpec(shape=(), dtype=tensorflow.float32),
             ),
         )
-        data_path = "{}/{}/{}".format(
-            args.tfds_path,"valid", tf
-        )
+        data_path = "{}/{}/{}".format(args.tfds_path, "valid", tf)
         data.save(
             path=data_path,
             compression="GZIP",
         )
-        data_meta.loc[data_meta.shape[0]] = ["valid", tf, '.', '.', data_path]
+        data_meta.loc[data_meta.shape[0]] = ["valid", tf, ".", ".", data_path]
 
         print("Getting train samples")
 
@@ -316,21 +313,17 @@ def run_training(args):
                 tensorflow.TensorSpec(shape=(), dtype=tensorflow.float32),
             ),
         )
-        data_path = (
-            "{}/{}/{}_{}_{}".format(
-                args.tfds_path, "train", tf, '.', "ATAC"
-            )
-        )
+        data_path = "{}/{}/{}_{}_{}".format(args.tfds_path, "train", tf, ".", "ATAC")
         data.save(
             path=data_path,
             compression="GZIP",
         )
-        data_meta.loc[data_meta.shape[0]] = ["train", tf, '.', 'ATAC', data_path]
+        data_meta.loc[data_meta.shape[0]] = ["train", tf, ".", "ATAC", data_path]
 
         # training dataset, augmented by cell type shuffling, and extended input size
         for cell_type in maxatac_model.cell_types:
             # chip
-            print("CHIP",cell_type,sep="\t")
+            print("CHIP", cell_type, sep="\t")
             data = tensorflow.data.Dataset.from_generator(
                 DataGen(
                     sequence=args.sequence,
@@ -356,16 +349,20 @@ def run_training(args):
                     tensorflow.TensorSpec(shape=(), dtype=tensorflow.float32),
                 ),
             )
-            data_path = (
-                "{}/{}/{}_{}_{}".format(
-                    args.tfds_path,"train", tf, cell_type, "CHIP"
-                )
+            data_path = "{}/{}/{}_{}_{}".format(
+                args.tfds_path, "train", tf, cell_type, "CHIP"
             )
             data.save(
                 path=data_path,
                 compression="GZIP",
             )
-            data_meta.loc[data_meta.shape[0]] = ["train", tf, cell_type, 'CHIP', data_path]
+            data_meta.loc[data_meta.shape[0]] = [
+                "train",
+                tf,
+                cell_type,
+                "CHIP",
+                data_path,
+            ]
 
         data_meta.to_csv(args.tfds_meta, header=True, index=False, sep="\t")
         logging.error("Generate tfds completed!")
@@ -495,49 +492,41 @@ def run_training(args):
     #     val_gen_enq.start(workers=1, max_queue_size=queue_size)
     # enq_val_gen = val_gen_enq.get()
 
-
     # get tfds train and valid object
 
-    data_meta=pd.read_csv(args.tfds_meta,header=0,sep='\t')
-
-    # valid data
-    valid_tfds_file = data_meta[data_meta['train or valid'] == 'valid']['path'].values[0]
-    valid_tfds=tensorflow.data.Dataset.load(valid_tfds_file,compression="GZIP",)
-    valid_data=(valid_tfds
-                .take(
-                    (validate_examples.ROI_pool.shape[0] // args.batch_size)
-                    * args.batch_size
-                )
-                .map(peak_centric_map)
-                .cache()
-                .repeat(args.epochs)
-                .batch(
-                    batch_size=args.batch_size,
-                    num_parallel_calls=tensorflow.data.AUTOTUNE,
-                    drop_remainder=True,
-                    deterministic=False,
-                )
-                .prefetch(tensorflow.data.AUTOTUNE)
-    )
+    data_meta = pd.read_csv(args.tfds_meta, header=0, sep="\t")
 
     # train data
     # atac
-    atac_tfds_file = data_meta[(data_meta['train or valid'] == 'train') & (data_meta['roi_type'] == 'ATAC')]['path'].values[0]
-    atac_tfds=tensorflow.data.Dataset.load(atac_tfds_file,compression="GZIP",)
+    atac_tfds_file = data_meta[
+        (data_meta["train or valid"] == "train") & (data_meta["roi_type"] == "ATAC")
+    ]["path"].values[0]
+    atac_tfds = tensorflow.data.Dataset.load(
+        atac_tfds_file,
+        compression="GZIP",
+    )
 
     # chip
     chip_tfds = []
-    for cell_type, file_path in data_meta[(data_meta['train or valid'] == 'train') & (data_meta['roi_type'] == 'CHIP')][['cell_type', 'path']].values:
-        if maxatac_model.meta_dataframe[maxatac_model.meta_dataframe["Cell_Line"] == cell_type]['Train_Test_Label'].values[0] == "Train":
-            tfds = tensorflow.data.Dataset.load(file_path, compression="GZIP", )
+    for cell_type, file_path in data_meta[
+        (data_meta["train or valid"] == "train") & (data_meta["roi_type"] == "CHIP")
+    ][["cell_type", "path"]].values:
+        if (
+            maxatac_model.meta_dataframe[
+                maxatac_model.meta_dataframe["Cell_Line"] == cell_type
+            ]["Train_Test_Label"].values[0]
+            == "Train"
+        ):
+            tfds = tensorflow.data.Dataset.load(
+                file_path,
+                compression="GZIP",
+            )
             data = tfds.map(peak_centric_map)
             chip_tfds.append(data)
 
-
-    _chip_size=len(chip_tfds)
-    _chip_prob=1.0/(1.0+float(args.ATAC_Sampling_Multiplier))
-    _atac_prob=(1.0-_chip_prob)
-
+    _chip_size = len(chip_tfds)
+    _chip_prob = 1.0 / (1.0 + float(args.ATAC_Sampling_Multiplier))
+    _atac_prob = 1.0 - _chip_prob
 
     # train_data_chip=tensorflow.data.Dataset.sample_from_datasets(
     #     chip_tfds,
@@ -547,23 +536,59 @@ def run_training(args):
     # )
 
     # vstack
-    train_data_chip=chip_tfds[0]
-    if len(chip_tfds)>1:
-        for k in range(1,len(chip_tfds)):
-            train_data_chip=train_data_chip.concatenate(chip_tfds[k])
-
-    train_data_chip.cache().shuffle(train_data_chip.cardinality().numpy()).repeat(args.epochs)
+    train_data_chip = chip_tfds[0]
+    if len(chip_tfds) > 1:
+        for k in range(1, len(chip_tfds)):
+            train_data_chip = train_data_chip.concatenate(chip_tfds[k])
 
     # re-assign steps_per_epoch_v2 here
-    steps_per_epoch_v2 = train_data_chip.cardinality().numpy() // np.ceil((args.batch_size / (1.0 + float(args.ATAC_Sampling_Multiplier))))
+    steps_per_epoch_v2 = train_data_chip.cardinality().numpy() // np.ceil(
+        (args.batch_size / (1.0 + float(args.ATAC_Sampling_Multiplier)))
+    )
 
-    train_data = (tensorflow.data.Dataset.sample_from_datasets(
-        [train_data_chip,atac_tfds.map(peak_centric_map).cache().repeat(args.epochs)],
-        weights=[_chip_prob,_atac_prob],
-        stop_on_empty_dataset=False,
-        rerandomize_each_iteration=True
+    train_data = (
+        tensorflow.data.Dataset.sample_from_datasets(
+            [
+                train_data_chip
+                .cache()
+                .shuffle(train_data_chip.cardinality().numpy())
+                .repeat(args.epochs),  # already mapped, full shuffle to break sequence order within epoch
+                atac_tfds
+                .map(peak_centric_map)
+                .cache()
+                .shuffle(atac_tfds.cardinality().numpy())
+                .repeat(args.epochs),  # full shuffle to maximize BG coverage
+            ],
+            weights=[_chip_prob, _atac_prob],
+            stop_on_empty_dataset=False,
+            rerandomize_each_iteration=True,
         )
-        .batch(batch_size= args.batch_size,
+        .batch(
+            batch_size=args.batch_size,
+            num_parallel_calls=tensorflow.data.AUTOTUNE,
+            drop_remainder=True,
+            deterministic=False,
+        )
+        .prefetch(tensorflow.data.AUTOTUNE)
+    )
+
+    # valid data
+    valid_tfds_file = data_meta[data_meta["train or valid"] == "valid"]["path"].values[
+        0
+    ]
+    valid_tfds = tensorflow.data.Dataset.load(
+        valid_tfds_file,
+        compression="GZIP",
+    )
+    valid_data = (
+        valid_tfds.take(
+            (validate_examples.ROI_pool.shape[0] // args.batch_size) * args.batch_size
+        )
+        .map(peak_centric_map)
+        .cache()
+        .repeat(args.epochs)
+        .batch(
+            batch_size=args.batch_size,
             num_parallel_calls=tensorflow.data.AUTOTUNE,
             drop_remainder=True,
             deterministic=False,
@@ -590,7 +615,6 @@ def run_training(args):
         workers=1,
         verbose=1,
     )
-
 
     # Fit the model
     # logging.error("Start training the model")
@@ -643,7 +667,6 @@ def run_training(args):
     #         workers=1,
     #         verbose=1,
     #     )
-
 
     logging.error("Plot and save results")
 

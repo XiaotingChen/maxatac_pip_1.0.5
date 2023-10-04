@@ -257,7 +257,7 @@ class dice_coef_class(tf.keras.metrics.Metric):
         flanking_truncation_size=0,
         **kwargs
     ):
-        super(dice_coef, self).__init__(name=name, **kwargs)
+        super(dice_coef_class, self).__init__(name=name, **kwargs)
         self.y_true_min = y_true_min
         self.unknown_coef = unknown_coef
         self.flanking_truncation_size = flanking_truncation_size
