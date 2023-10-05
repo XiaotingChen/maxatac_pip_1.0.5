@@ -806,7 +806,7 @@ def get_multiinput_transformer(
                 y_pred=y,
                 flanking_truncation_size=model_config["LOSS_FLANKING_TRUNCATION_SIZE"],
             ),
-            metrics=[
+            weighted_metrics=[
                 MeanMetricWrapper(
                     dice_coef_class(
                         flanking_truncation_size=model_config[
@@ -826,7 +826,7 @@ def get_multiinput_transformer(
                 apply_class_balancing=model_config["FOCAL_LOSS_APPLY_ALPHA"],
                 flanking_truncation_size=model_config["LOSS_FLANKING_TRUNCATION_SIZE"],
             ),
-            metrics=[
+            weighted_metrics=[
                 MeanMetricWrapper(
                     dice_coef_class(
                         flanking_truncation_size=model_config[
