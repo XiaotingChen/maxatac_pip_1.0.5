@@ -265,6 +265,7 @@ def run_training(args):
                 shuffle=True,
                 chr_limit=chr_limit,
                 flanking_padding_size=512,
+                override_chip_shrinkage_factor=True,
             ),
             output_signature=(
                 tensorflow.TensorSpec(
@@ -337,6 +338,7 @@ def run_training(args):
                     shuffle=True,
                     chr_limit=chr_limit,
                     flanking_padding_size=512,
+                    override_shrinkage_factor=True,
                 ),
                 output_signature=(
                     tensorflow.TensorSpec(

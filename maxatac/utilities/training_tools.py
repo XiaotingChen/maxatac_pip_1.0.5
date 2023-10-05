@@ -831,6 +831,7 @@ class DataGen:
         chr_limit={},
         flanking_padding_size=512,
         window_size=INPUT_LENGTH,
+        override_shrinkage_factor=False
     ):
         "Initialization"
         self.roi_pool = roi_pool.copy()
@@ -847,11 +848,14 @@ class DataGen:
         self.chr_limit = chr_limit
         self.flanking_padding_size = flanking_padding_size
         self.window_size = window_size
+        self.override_shrinkage_factor=override_shrinkage_factor
 
         if self.chip == False:
             self.roi_pool["Weight shrinkage factor"] = 1.0 / float(
                 self.chip_sample_weight_baseline
             )
+        if self.override_shrinkage_factor:
+            self.roi_pool["Weight shrinkage factor"] = 1.0
         self.roi_pool.reset_index(drop=True, inplace=True)
         self.total_size = self.roi_pool.shape[0]
         self.indexes = np.arange(self.total_size)
@@ -982,6 +986,7 @@ class ValidDataGen:
         chr_limit={},
         flanking_padding_size=512,
         window_size=INPUT_LENGTH,
+        override_chip_shrinkage_factor=False
     ):
         "Initialization"
         self.roi_pool_chip = roi_pool_chip.copy()
@@ -998,10 +1003,14 @@ class ValidDataGen:
         self.chr_limit = chr_limit
         self.flanking_padding_size = flanking_padding_size
         self.window_size = window_size
+        self.override_chip_shrinkage_factor=override_chip_shrinkage_factor
 
         self.roi_pool_atac["Weight shrinkage factor"] = 1.0 / float(
             self.chip_sample_weight_baseline
         )
+        if self.override_chip_shrinkage_factor:
+            self.roi_pool_chip["Weight shrinkage factor"] = 1.0
+
         _total_size = self.roi_pool_chip.shape[0] + self.roi_pool_atac.shape[0]
         _number_to_drop = _total_size % self.batch_size
         self.roi_pool_atac.reset_index(drop=True, inplace=True)
