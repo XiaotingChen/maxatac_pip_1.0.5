@@ -90,6 +90,57 @@ def loss_function(
     return tf.reduce_mean(input_tensor=losses)
 
 
+class loss_function_class(tf.keras.losses.Loss):
+    def __init__(
+        self,
+        name="loss",
+        reduction=tf.keras.losses.Reduction.NONE,
+        flanking_truncation_size=0,
+    ):
+        super(loss_function_class, self).__init__(name=name, reduction=reduction)
+        self.flanking_truncation_size = flanking_truncation_size
+        self.y_pred_min = (0.0000001,)  # 1e-7
+        self.y_pred_max = (0.9999999,)  # 1 - 1e-7
+        self.y_true_min = -0.5
+
+    def call(self, y_true, y_pred):
+        _shape = tf.shape(y_true)
+        if len(_shape) == 1:  # per sample
+            _length = _shape[0]
+            y_true = tf.slice(
+                y_true,
+                begin=[self.flanking_truncation_size],
+                size=[_length - 2 * self.flanking_truncation_size],
+            )
+            y_pred = tf.slice(
+                y_pred,
+                begin=[self.flanking_truncation_size],
+                size=[_length - 2 * self.flanking_truncation_size],
+            )
+        else:  # per batch
+            _length = _shape[1]
+            _sample = _shape[0]
+            y_true = tf.slice(
+                y_true,
+                begin=[0, self.flanking_truncation_size],
+                size=[_sample, _length - 2 * self.flanking_truncation_size],
+            )
+            y_pred = tf.slice(
+                y_pred,
+                begin=[0, self.flanking_truncation_size],
+                size=[_sample, _length - 2 * self.flanking_truncation_size],
+            )
+
+        y_true = K.flatten(y_true)
+        y_pred = tf.clip_by_value(K.flatten(y_pred), self.y_pred_min, self.y_pred_max)
+
+        losses = tf.boolean_mask(
+            tensor=-y_true * K.log(y_pred) - (1 - y_true) * K.log(1 - y_pred),
+            mask=K.greater_equal(y_true, self.y_true_min),
+        )
+        return tf.reduce_mean(input_tensor=losses)
+
+
 class loss_function_focal_class(tf.keras.losses.Loss):
     def __init__(
         self,
@@ -306,61 +357,6 @@ class dice_coef_class(tf.keras.metrics.Metric):
 
     def reset_state(self):
         self.dice_coef.assign(0.0)
-
-
-class dice_coef(tf.keras.metrics.Metric):
-    def __init__(
-        self,
-        name="dice_coef",
-        y_true_min=-0.5,
-        unknown_coef=10,
-        flanking_truncation_size=0,
-        **kwargs
-    ):
-        super(BinaryTruePositives, self).__init__(name=name, **kwargs)
-        self.y_true_min = y_true_min
-        self.unknown_coef = unknown_coef
-        self.flanking_truncation_size = flanking_truncation_size
-        self.dice_coef = self.add_weight(name="dice_coef", initializer="zeros")
-
-    def update_state(self, y_true, y_pred, sample_weight=None):
-        _shape = tf.shape(y_true)
-        if len(_shape) == 1:  # per sample
-            _length = _shape[0]
-            y_true = tf.slice(
-                y_true,
-                begin=[self.flanking_truncation_size],
-                size=[_length - 2 * self.flanking_truncation_size],
-            )
-            y_pred = tf.slice(
-                y_pred,
-                begin=[self.flanking_truncation_size],
-                size=[_length - 2 * self.flanking_truncation_size],
-            )
-        else:  # per batch
-            _length = _shape[1]
-            _sample = _shape[0]
-            y_true = tf.slice(
-                y_true,
-                begin=[0, self.flanking_truncation_size],
-                size=[_sample, _length - 2 * self.flanking_truncation_size],
-            )
-            y_pred = tf.slice(
-                y_pred,
-                begin=[0, self.flanking_truncation_size],
-                size=[_sample, _length - 2 * self.flanking_truncation_size],
-            )
-
-        y_true = K.flatten(y_true)
-        y_pred = K.flatten(y_pred)
-        mask = K.cast(K.greater_equal(y_true, self.y_true_min), dtype="float32")
-        intersection = K.sum(y_true * y_pred * mask)
-        numerator = 2.0 * intersection + self.unknown_coef
-        denominator = K.sum(y_true * mask) + K.sum(y_pred * mask) + unknown_coef
-        self.dice_coef.assign_add(numerator / denominator)
-
-    def result(self):
-        return self.dice_coef
 
 
 def tp(y_true, y_pred, pred_thresh=0.5):

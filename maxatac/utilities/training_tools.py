@@ -831,7 +831,7 @@ class DataGen:
         chr_limit={},
         flanking_padding_size=512,
         window_size=INPUT_LENGTH,
-        override_shrinkage_factor=False
+        override_shrinkage_factor=False,
     ):
         "Initialization"
         self.roi_pool = roi_pool.copy()
@@ -848,7 +848,7 @@ class DataGen:
         self.chr_limit = chr_limit
         self.flanking_padding_size = flanking_padding_size
         self.window_size = window_size
-        self.override_shrinkage_factor=override_shrinkage_factor
+        self.override_shrinkage_factor = override_shrinkage_factor
 
         if self.chip == False:
             self.roi_pool["Weight shrinkage factor"] = 1.0 / float(
@@ -881,7 +881,7 @@ class DataGen:
         # Extract the signal for every sample
         roi_row = self.roi_pool.iloc[index : index + 1, :]
 
-        if self.cell_type!=None:
+        if self.cell_type != None:
             cell_line = self.cell_type  # pre-defined cell type
         else:
             cell_line = roi_row["Cell_Line"].values[0]
@@ -986,7 +986,7 @@ class ValidDataGen:
         chr_limit={},
         flanking_padding_size=512,
         window_size=INPUT_LENGTH,
-        override_chip_shrinkage_factor=False
+        override_chip_shrinkage_factor=False,
     ):
         "Initialization"
         self.roi_pool_chip = roi_pool_chip.copy()
@@ -1003,7 +1003,7 @@ class ValidDataGen:
         self.chr_limit = chr_limit
         self.flanking_padding_size = flanking_padding_size
         self.window_size = window_size
-        self.override_chip_shrinkage_factor=override_chip_shrinkage_factor
+        self.override_chip_shrinkage_factor = override_chip_shrinkage_factor
 
         self.roi_pool_atac["Weight shrinkage factor"] = 1.0 / float(
             self.chip_sample_weight_baseline
@@ -1792,10 +1792,41 @@ def CHIP_sample_weight_adjustment(CHIP_roi_df):
         ["Chr", "Start", "Stop", "ROI_Type", "Cell_Line", "Weight shrinkage factor"]
     ]
 
-def peak_centric_map(x,y,z):
-    return x[512:-512,:],y[16:-16],z
 
-def random_shuffling_map(x,y,z):
-    shift=np.random.randint(low=0,high=INPUT_LENGTH)
-    y_shift=np.floor(shift/32)
-    return x[shift:shift+INPUT_LENGTH,:],y[y_shift,y_shift+OUTPUT_LENGTH],z
+def peak_centric_map(x, y, z):
+    return x[512:-512, :], y[16:-16], z
+
+
+def random_shuffling_map(x, y, z):
+    shift = np.random.randint(low=0, high=INPUT_LENGTH)
+    y_shift = int(np.floor(shift / 32))
+    return x[shift : shift + INPUT_LENGTH, :], y[y_shift : y_shift + OUTPUT_LENGTH], z
+
+
+def peak_centric_map_tf(x, y, z):
+    shift = tf.constant(512, dtype=tf.int32)
+    y_shift = tf.cast(tf.math.divide_no_nan(shift, OUTPUT_LENGTH), dtype=tf.int32)
+    _length = tf.shape(x)[0]
+    _dim = tf.shape(x)[1]
+
+    return (
+        tf.slice(x, begin=[shift, 0], size=[INPUT_LENGTH, _dim]),
+        tf.slice(y, begin=[y_shift], size=[OUTPUT_LENGTH]),
+        z,
+    )
+
+
+def random_shuffling_map_tf(x, y, z):
+    shift = tf.random.uniform([1], minval=0, maxval=INPUT_LENGTH, dtype=tf.int32)[0]
+    y_shift = tf.cast(tf.math.divide_no_nan(shift, OUTPUT_LENGTH), dtype=tf.int32)
+    _length = tf.shape(x)[0]
+    _dim = tf.shape(x)[1]
+
+    return (
+        tf.slice(x, begin=[shift, 0], size=[INPUT_LENGTH, _dim]),
+        tf.slice(y, begin=[y_shift], size=[OUTPUT_LENGTH]),
+        z,
+    )
+
+
+dataset_mapping = {True: random_shuffling_map_tf, False: peak_centric_map_tf}

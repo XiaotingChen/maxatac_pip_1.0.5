@@ -37,6 +37,7 @@ with Mute():
         DataGen,
         peak_centric_map,
         random_shuffling_map,
+        dataset_mapping
     )
     from maxatac.utilities.plot import (
         export_binary_metrics,
@@ -287,7 +288,7 @@ def run_training(args):
 
         print("Getting train samples")
 
-        # atac # todo: need to parallize this block into smaller chunks
+        # atac #
         print("ATAC")
         data = tensorflow.data.Dataset.from_generator(
             DataGen(
@@ -370,40 +371,6 @@ def run_training(args):
         logging.error("Generate tfds completed!")
         sys.exit()
 
-    # # Initialize the training generator
-    # if args.ATAC_Sampling_Multiplier == 0:
-    #     train_gen = DataGenerator(
-    #         sequence=args.sequence,
-    #         meta_table=maxatac_model.meta_dataframe,
-    #         roi_pool=train_examples.ROI_pool,
-    #         cell_type_list=maxatac_model.cell_types,
-    #         rand_ratio=args.rand_ratio,
-    #         chroms=args.tchroms,
-    #         batch_size=args.batch_size,
-    #         shuffle_cell_type=args.shuffle_cell_type,
-    #         rev_comp_train=args.rev_comp,
-    #         inter_fusion=model_config["INTER_FUSION"],
-    #     )
-    # else:
-    #     train_gen = DataGenerator_v2(
-    #         sequence=args.sequence,
-    #         meta_table=maxatac_model.meta_dataframe,
-    #         roi_pool_atac=train_examples.ROI_pool_ATAC,
-    #         roi_pool_chip=train_examples.ROI_pool_CHIP,
-    #         cell_type_list=maxatac_model.cell_types,
-    #         rand_ratio=args.rand_ratio,
-    #         chroms=args.tchroms,
-    #         batch_size=args.batch_size,
-    #         shuffle_cell_type=args.shuffle_cell_type,
-    #         rev_comp_train=args.rev_comp,
-    #         inter_fusion=False,
-    #         atac_sampling_multiplier=args.ATAC_Sampling_Multiplier,
-    #         chip_sample_weight_baseline=args.CHIP_Sample_Weight_Baseline,
-    #     )
-    #
-    # # Create keras.utils.sequence object from training generator
-    # seq_train_gen = SeqDataGenerator(batches=args.batch_size, generator=train_gen)
-
     # Specify max_que_size
     if args.max_queue_size:
         queue_size = int(args.max_queue_size)
@@ -411,88 +378,6 @@ def run_training(args):
     else:
         queue_size = args.threads * 2
         logging.info("Max Queue Size found: " + str(queue_size))
-
-    # # Builds a Enqueuer from a Sequence.
-    # # Specify multiprocessing
-    # if args.multiprocessing:
-    #     logging.info("Training with multiprocessing")
-    #     train_gen_enq = OrderedEnqueuer(seq_train_gen, use_multiprocessing=True)
-    #     train_gen_enq.start(workers=args.threads, max_queue_size=queue_size)
-    #
-    # else:
-    #     logging.info("Training without multiprocessing")
-    #     train_gen_enq = OrderedEnqueuer(seq_train_gen, use_multiprocessing=False)
-    #     train_gen_enq.start(workers=1, max_queue_size=queue_size)
-    #
-    # enq_train_gen = (
-    #     train_gen_enq.get()
-    # )  # enq_train_gen is now a generator to extract data from the queue
-    #
-    # # validation tfds
-    # valid_data = tensorflow.data.Dataset.from_generator(
-    #     ValidDataGen(
-    #         sequence=args.sequence,
-    #         meta_table=maxatac_model.meta_dataframe,
-    #         roi_pool_atac=validate_examples.ROI_pool_ATAC,
-    #         roi_pool_chip=validate_examples.ROI_pool_CHIP,
-    #         cell_type_list=maxatac_model.cell_types,
-    #         atac_sampling_multiplier=args.ATAC_Sampling_Multiplier,
-    #         chip_sample_weight_baseline=args.CHIP_Sample_Weight_Baseline,
-    #         batch_size=args.batch_size,
-    #         shuffle=True,
-    #     ),
-    #     output_signature=(
-    #         tensorflow.TensorSpec(shape=(1024, 5), dtype=tensorflow.float32),
-    #         tensorflow.TensorSpec(shape=(32), dtype=tensorflow.float32),
-    #         tensorflow.TensorSpec(shape=(), dtype=tensorflow.float32),
-    #     ),
-    # )
-
-    # # Initialize the validation generator
-    # if args.ATAC_Sampling_Multiplier == 0:
-    #     val_gen = DataGenerator(
-    #         sequence=args.sequence,
-    #         meta_table=maxatac_model.meta_dataframe,
-    #         roi_pool=validate_examples.ROI_pool,
-    #         cell_type_list=maxatac_model.cell_types,
-    #         rand_ratio=args.rand_ratio,
-    #         chroms=args.vchroms,
-    #         batch_size=args.batch_size,
-    #         shuffle_cell_type=args.shuffle_cell_type,
-    #         rev_comp_train=args.rev_comp,
-    #         inter_fusion=model_config["INTER_FUSION"],
-    #     )
-    # else:
-    #     val_gen = DataGenerator_v2(
-    #         sequence=args.sequence,
-    #         meta_table=maxatac_model.meta_dataframe,
-    #         roi_pool_atac=validate_examples.ROI_pool_ATAC,
-    #         roi_pool_chip=validate_examples.ROI_pool_CHIP,
-    #         cell_type_list=maxatac_model.cell_types,
-    #         rand_ratio=args.rand_ratio,
-    #         chroms=args.vchroms,
-    #         batch_size=args.batch_size,
-    #         shuffle_cell_type=False,
-    #         rev_comp_train=args.rev_comp,
-    #         inter_fusion=model_config["INTER_FUSION"],
-    #         atac_sampling_multiplier=args.ATAC_Sampling_Multiplier,
-    #         chip_sample_weight_baseline=args.CHIP_Sample_Weight_Baseline,
-    #     )
-    #
-    # # Create keras.utils.sequence object from validation generator
-    # seq_validate_gen = SeqDataGenerator(batches=args.batch_size, generator=val_gen)
-    #
-    # # Builds a Enqueuer from a Sequence.
-    # # Specify multiprocessing
-    # if args.multiprocessing:
-    #     logging.info("Validating with multiprocessing")
-    #     val_gen_enq = OrderedEnqueuer(seq_validate_gen, use_multiprocessing=True)
-    #     val_gen_enq.start(workers=args.threads, max_queue_size=queue_size)
-    # else:
-    #     logging.info("Validating without multiprocessing")
-    #     val_gen_enq = OrderedEnqueuer(seq_validate_gen, use_multiprocessing=False)
-    #     val_gen_enq.start(workers=1, max_queue_size=queue_size)
-    # enq_val_gen = val_gen_enq.get()
 
     # get tfds train and valid object
 
@@ -523,18 +408,19 @@ def run_training(args):
                 file_path,
                 compression="GZIP",
             )
-            data = tfds.map(peak_centric_map)
+            data = tfds
             chip_tfds.append(data)
 
     _chip_size = len(chip_tfds)
     _chip_prob = 1.0 / (1.0 + float(args.ATAC_Sampling_Multiplier))
     _atac_prob = 1.0 - _chip_prob
 
+    # hstack
     # train_data_chip=tensorflow.data.Dataset.sample_from_datasets(
     #     chip_tfds,
     #     weights=[1.0/float(_chip_size)]*_chip_size,
     #     stop_on_empty_dataset=False,
-    #     rerandomize_each_iteration=True
+    #     rerandomize_each_iteration=False
     # )
 
     # vstack
@@ -553,17 +439,18 @@ def run_training(args):
             [
                 train_data_chip
                 .cache()
+                .map(map_func=dataset_mapping[args.SHUFFLE_AUGMENTATION],num_parallel_calls=tensorflow.data.AUTOTUNE)
                 .shuffle(train_data_chip.cardinality().numpy())
                 .repeat(args.epochs),  # already mapped, full shuffle to break sequence order within epoch
                 atac_tfds
-                .map(peak_centric_map)
                 .cache()
+                .map(map_func=dataset_mapping[args.SHUFFLE_AUGMENTATION],num_parallel_calls=tensorflow.data.AUTOTUNE)
                 .shuffle(atac_tfds.cardinality().numpy())
                 .repeat(args.epochs),  # full shuffle to maximize BG coverage
             ],
             weights=[_chip_prob, _atac_prob],
             stop_on_empty_dataset=False,
-            rerandomize_each_iteration=True,
+            rerandomize_each_iteration=False,
         )
         .batch(
             batch_size=args.batch_size,
@@ -586,8 +473,8 @@ def run_training(args):
         valid_tfds.take(
             (validate_examples.ROI_pool.shape[0] // args.batch_size) * args.batch_size
         )
-        .map(peak_centric_map)
         .cache()
+        .map(map_func=dataset_mapping[False],num_parallel_calls=tensorflow.data.AUTOTUNE) # whether to use non-shuffle validation
         .repeat(args.epochs)
         .batch(
             batch_size=args.batch_size,
@@ -617,58 +504,6 @@ def run_training(args):
         workers=1,
         verbose=1,
     )
-
-    # Fit the model
-    # logging.error("Start training the model")
-    # if args.ATAC_Sampling_Multiplier == 0:
-    #     training_history = maxatac_model.nn_model.fit(
-    #         enq_train_gen,
-    #         # model.fit() accepts a generator or Sequence that returns (inputs, targets). From the doc, when x is a generator, y should not be specified
-    #         validation_data=enq_val_gen,
-    #         steps_per_epoch=args.batches,
-    #         validation_steps=args.batches,
-    #         epochs=args.epochs,
-    #         callbacks=get_callbacks(
-    #             model_location=maxatac_model.results_location,
-    #             log_location=maxatac_model.log_location,
-    #             tensor_board_log_dir=maxatac_model.tensor_board_log_dir,
-    #             monitor=TRAIN_MONITOR,
-    #         ),
-    #         max_queue_size=10,
-    #         use_multiprocessing=False,
-    #         workers=1,
-    #         verbose=1,
-    #     )
-    # else:
-    #     training_history = maxatac_model.nn_model.fit(
-    #         enq_train_gen,  # model.fit() accepts a generator or Sequence that returns (inputs, targets). From the doc, when x is a generator, y should not be specified
-    #         epochs=args.epochs,
-    #         steps_per_epoch=steps_per_epoch_v2,
-    #         validation_data=valid_data.take(
-    #             (validate_examples.ROI_pool.shape[0] // args.batch_size)
-    #             * args.batch_size
-    #         )
-    #         .cache()
-    #         .repeat(args.epochs)
-    #         .batch(
-    #             batch_size=args.batch_size,
-    #             num_parallel_calls=tensorflow.data.AUTOTUNE,
-    #             drop_remainder=True,
-    #         )
-    #         .prefetch(tensorflow.data.AUTOTUNE),
-    #         validation_steps=validate_examples.ROI_pool.shape[0] // args.batch_size,
-    #         callbacks=get_callbacks(
-    #             model_location=maxatac_model.results_location,
-    #             log_location=maxatac_model.log_location,
-    #             tensor_board_log_dir=maxatac_model.tensor_board_log_dir,
-    #             monitor=TRAIN_MONITOR,
-    #             reduce_lr_on_plateau=args.reduce_lr_on_plateau,
-    #         ),
-    #         max_queue_size=queue_size,
-    #         use_multiprocessing=False,
-    #         workers=1,
-    #         verbose=1,
-    #     )
 
     logging.error("Plot and save results")
 

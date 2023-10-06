@@ -1029,6 +1029,13 @@ def get_parser():
         help="Ouput flanking size to truncate in loss calculation",
     )
 
+    train_parser.add_argument(
+        "--SHUFFLE_AUGMENTATION",
+        dest="SHUFFLE_AUGMENTATION",
+        action="store_true",
+        default=False,
+        help="Whether enable shuffle augmentation",
+    )
     #############################################
     # Pretrain parser
     #############################################

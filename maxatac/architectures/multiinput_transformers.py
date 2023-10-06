@@ -72,6 +72,7 @@ with Mute():
         loss_function_focal_class,
         dice_coef,
         dice_coef_class,
+        loss_function_class,
         get_layer,
         get_residual_layer,
     )
@@ -801,9 +802,7 @@ def get_multiinput_transformer(
     if model_config["FOCAL_LOSS"] == False:
         model.compile(
             optimizer,
-            loss=lambda x, y: loss_function(
-                y_true=x,
-                y_pred=y,
+            loss=loss_function_class(
                 flanking_truncation_size=model_config["LOSS_FLANKING_TRUNCATION_SIZE"],
             ),
             weighted_metrics=[
