@@ -17,6 +17,7 @@ from maxatac.utilities.constants import (
     INPUT_LENGTH,
     INPUT_CHANNELS,
     OUTPUT_LENGTH,
+    BP_RESOLUTION,
 )
 from maxatac.utilities.system_tools import Mute
 from maxatac.utilities.phuc_utilities import generate_numpy_arrays
@@ -35,8 +36,6 @@ with Mute():
         CHIP_sample_weight_adjustment,
         ValidDataGen,
         DataGen,
-        peak_centric_map,
-        random_shuffling_map,
         dataset_mapping
     )
     from maxatac.utilities.plot import (
@@ -142,6 +141,8 @@ def run_training(args):
     model_config["ELASTIC_L2"] = args.ELASTIC_L2
 
     model_config["LOSS_FLANKING_TRUNCATION_SIZE"] = args.LOSS_FLANKING_TRUNCATION_SIZE
+
+    model_config["SHUFFLE_AUGMENTATION"] = args.SHUFFLE_AUGMENTATION
 
     # Initialize the model with the architecture of choice
     maxatac_model = MaxATACModel(
@@ -265,7 +266,7 @@ def run_training(args):
                 batch_size=args.batch_size,
                 shuffle=True,
                 chr_limit=chr_limit,
-                flanking_padding_size=512,
+                flanking_padding_size=args.flanking_size,
                 override_chip_shrinkage_factor=True,
             ),
             output_signature=(
@@ -274,7 +275,7 @@ def run_training(args):
                     dtype=tensorflow.float32,
                 ),
                 tensorflow.TensorSpec(
-                    shape=(OUTPUT_LENGTH * 2), dtype=tensorflow.float32
+                    shape=(OUTPUT_LENGTH + int(np.ceil(args.flanking_size*2/BP_RESOLUTION))), dtype=tensorflow.float32
                 ),
                 tensorflow.TensorSpec(shape=(), dtype=tensorflow.float32),
             ),
@@ -310,7 +311,7 @@ def run_training(args):
                     dtype=tensorflow.float32,
                 ),
                 tensorflow.TensorSpec(
-                    shape=(OUTPUT_LENGTH * 2), dtype=tensorflow.float32
+                    shape=(OUTPUT_LENGTH + int(np.ceil(args.flanking_size*2/BP_RESOLUTION))), dtype=tensorflow.float32
                 ),
                 tensorflow.TensorSpec(shape=(), dtype=tensorflow.float32),
             ),
@@ -338,7 +339,7 @@ def run_training(args):
                     batch_size=args.batch_size,
                     shuffle=True,
                     chr_limit=chr_limit,
-                    flanking_padding_size=512,
+                    flanking_padding_size=args.flanking_size,
                     override_shrinkage_factor=True,
                 ),
                 output_signature=(
@@ -347,7 +348,7 @@ def run_training(args):
                         dtype=tensorflow.float32,
                     ),
                     tensorflow.TensorSpec(
-                        shape=(OUTPUT_LENGTH * 2), dtype=tensorflow.float32
+                        shape=(OUTPUT_LENGTH + int(np.ceil(args.flanking_size*2/BP_RESOLUTION))), dtype=tensorflow.float32
                     ),
                     tensorflow.TensorSpec(shape=(), dtype=tensorflow.float32),
                 ),
@@ -441,12 +442,12 @@ def run_training(args):
                 .cache()
                 .map(map_func=dataset_mapping[args.SHUFFLE_AUGMENTATION],num_parallel_calls=tensorflow.data.AUTOTUNE)
                 .shuffle(train_data_chip.cardinality().numpy())
-                .repeat(args.epochs),  # already mapped, full shuffle to break sequence order within epoch
+                .repeat(args.epochs),
                 atac_tfds
                 .cache()
                 .map(map_func=dataset_mapping[args.SHUFFLE_AUGMENTATION],num_parallel_calls=tensorflow.data.AUTOTUNE)
                 .shuffle(atac_tfds.cardinality().numpy())
-                .repeat(args.epochs),  # full shuffle to maximize BG coverage
+                .repeat(args.epochs),
             ],
             weights=[_chip_prob, _atac_prob],
             stop_on_empty_dataset=False,
@@ -474,7 +475,8 @@ def run_training(args):
             (validate_examples.ROI_pool.shape[0] // args.batch_size) * args.batch_size
         )
         .cache()
-        .map(map_func=dataset_mapping[False],num_parallel_calls=tensorflow.data.AUTOTUNE) # whether to use non-shuffle validation
+        .map(map_func=dataset_mapping["peak_centric"] if args.SHUFFLE_AUGMENTATION!='no_map' else dataset_mapping[args.SHUFFLE_AUGMENTATION],
+             num_parallel_calls=tensorflow.data.AUTOTUNE) # whether to use non-shuffle validation
         .repeat(args.epochs)
         .batch(
             batch_size=args.batch_size,

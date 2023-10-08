@@ -13,7 +13,6 @@ with Mute():
     from maxatac.utilities.genome_tools import load_bigwig, load_2bit, dump_bigwig
     from maxatac.utilities.training_tools import get_input_matrix, MaxATACModel
     from maxatac.architectures.transformers import get_transformer
- 
 def sortChroms(chrom):
     """Sort a list of chromosomes based on a specific order
 

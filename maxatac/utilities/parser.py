@@ -1032,9 +1032,10 @@ def get_parser():
     train_parser.add_argument(
         "--SHUFFLE_AUGMENTATION",
         dest="SHUFFLE_AUGMENTATION",
-        action="store_true",
-        default=False,
-        help="Whether enable shuffle augmentation",
+        action="store",
+        default='peak_centric',
+        choices=["random", "peak_centric", "no_map"],
+        help="Choose preprocessing map",
     )
     #############################################
     # Pretrain parser

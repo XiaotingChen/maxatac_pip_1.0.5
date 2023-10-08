@@ -837,7 +837,7 @@ class DataGen:
         self.roi_pool = roi_pool.copy()
         self.sequence = sequence
         self.meta_table = meta_table
-        self.cell_type = None
+        self.cell_type = cell_type
         self.chip = chip
         self.bp_resolution = bp_resolution
         self.target_scale_factor = target_scale_factor
@@ -1793,17 +1793,17 @@ def CHIP_sample_weight_adjustment(CHIP_roi_df):
     ]
 
 
-def peak_centric_map(x, y, z):
-    return x[512:-512, :], y[16:-16], z
+# def peak_centric_map(x, y, w):
+#     return x[512:-512, :], y[16:-16], w
+#
+#
+# def random_shuffling_map(x, y, w):
+#     shift = np.random.randint(low=0, high=INPUT_LENGTH)
+#     y_shift = int(np.floor(shift / 32))
+#     return x[shift : shift + INPUT_LENGTH, :], y[y_shift : y_shift + OUTPUT_LENGTH], w
 
 
-def random_shuffling_map(x, y, z):
-    shift = np.random.randint(low=0, high=INPUT_LENGTH)
-    y_shift = int(np.floor(shift / 32))
-    return x[shift : shift + INPUT_LENGTH, :], y[y_shift : y_shift + OUTPUT_LENGTH], z
-
-
-def peak_centric_map_tf(x, y, z):
+def peak_centric_map_tf(x, y, w):
     shift = tf.constant(512, dtype=tf.int32)
     y_shift = tf.cast(tf.math.divide_no_nan(shift, OUTPUT_LENGTH), dtype=tf.int32)
     _length = tf.shape(x)[0]
@@ -1812,11 +1812,11 @@ def peak_centric_map_tf(x, y, z):
     return (
         tf.slice(x, begin=[shift, 0], size=[INPUT_LENGTH, _dim]),
         tf.slice(y, begin=[y_shift], size=[OUTPUT_LENGTH]),
-        z,
+        w,
     )
 
 
-def random_shuffling_map_tf(x, y, z):
+def random_shuffling_map_tf(x, y, w):
     shift = tf.random.uniform([1], minval=0, maxval=INPUT_LENGTH, dtype=tf.int32)[0]
     y_shift = tf.cast(tf.math.divide_no_nan(shift, OUTPUT_LENGTH), dtype=tf.int32)
     _length = tf.shape(x)[0]
@@ -1825,8 +1825,14 @@ def random_shuffling_map_tf(x, y, z):
     return (
         tf.slice(x, begin=[shift, 0], size=[INPUT_LENGTH, _dim]),
         tf.slice(y, begin=[y_shift], size=[OUTPUT_LENGTH]),
-        z,
+        w,
     )
 
+def no_mapping_tf(x,y,w):
+  return x,y,w
 
-dataset_mapping = {True: random_shuffling_map_tf, False: peak_centric_map_tf}
+dataset_mapping = {
+    'random': random_shuffling_map_tf,
+    'peak_centric': peak_centric_map_tf,
+    'no_map':no_mapping_tf
+}
