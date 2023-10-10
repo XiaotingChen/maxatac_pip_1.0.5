@@ -53,7 +53,7 @@ def loss_function(
     y_true_min=-0.5,
     flanking_truncation_size=0,
 ):
-    _shape = tf.shape(y_true)
+    _shape = y_true.shape
     if len(_shape) == 1:  # per sample
         _length = _shape[0]
         y_true = tf.slice(
@@ -104,7 +104,7 @@ class loss_function_class(tf.keras.losses.Loss):
         self.y_true_min = -0.5
 
     def call(self, y_true, y_pred):
-        _shape = tf.shape(y_true)
+        _shape = y_true.shape
         if len(_shape) == 1:  # per sample
             _length = _shape[0]
             y_true = tf.slice(
@@ -161,7 +161,7 @@ class loss_function_focal_class(tf.keras.losses.Loss):
         self.flanking_truncation_size = flanking_truncation_size
 
     def call(self, y_true, y_pred):
-        _shape = tf.shape(y_true)
+        _shape = y_true.shape
         if len(_shape) == 1:  # per sample
             _length = _shape[0]
             y_true = tf.slice(
@@ -263,7 +263,7 @@ def spearman(y_true, y_pred):
 def dice_coef(
     y_true, y_pred, y_true_min=-0.5, unknown_coef=10, flanking_truncation_size=0
 ):
-    _shape = tf.shape(y_true)
+    _shape = y_true.shape
     if len(_shape) == 1:  # per sample
         _length = _shape[0]
         y_true = tf.slice(
@@ -315,7 +315,7 @@ class dice_coef_class(tf.keras.metrics.Metric):
         self.dice_coef = self.add_weight(name="dice_coef", initializer="zeros")
 
     def update_state(self, y_true, y_pred, sample_weight=None):
-        _shape = tf.shape(y_true)
+        _shape = y_true.shape
         if len(_shape) == 1:  # per sample
             _length = _shape[0]
             y_true = tf.slice(

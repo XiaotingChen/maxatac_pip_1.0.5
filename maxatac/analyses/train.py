@@ -341,6 +341,7 @@ def run_training(args):
                     chr_limit=chr_limit,
                     flanking_padding_size=args.flanking_size,
                     override_shrinkage_factor=True,
+                    suppress_cell_type_TN_weight=True,
                 ),
                 output_signature=(
                     tensorflow.TensorSpec(

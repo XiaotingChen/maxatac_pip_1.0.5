@@ -832,6 +832,7 @@ class DataGen:
         flanking_padding_size=512,
         window_size=INPUT_LENGTH,
         override_shrinkage_factor=False,
+        suppress_cell_type_TN_weight=False
     ):
         "Initialization"
         self.roi_pool = roi_pool.copy()
@@ -849,6 +850,7 @@ class DataGen:
         self.flanking_padding_size = flanking_padding_size
         self.window_size = window_size
         self.override_shrinkage_factor = override_shrinkage_factor
+        self.suppress_cell_type_TN_weight=suppress_cell_type_TN_weight
 
         if self.chip == False:
             self.roi_pool["Weight shrinkage factor"] = 1.0 / float(
@@ -952,6 +954,11 @@ class DataGen:
 
             bin_sums = np.sum(split_targets, axis=1)
             bin_vector = np.where(bin_sums > 0.5 * self.bp_resolution, 1.0, 0.0)
+
+            if self.suppress_cell_type_TN_weight:
+                bin_vector_sum = np.sum(bin_vector)
+                if bin_vector_sum==0:
+                    weight_shrinkage_factor=1.0/float(self.chip_sample_weight_baseline) # so this gets sample_weight back to 1 for cell type specific TN samples
 
             # Append the sample to the target batch
             # targets_batch.append(bin_vector)
