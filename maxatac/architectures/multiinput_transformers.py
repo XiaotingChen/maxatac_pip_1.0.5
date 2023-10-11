@@ -635,9 +635,20 @@ def get_multiinput_transformer(
 
     # use only sequence side
     _offset = layer.shape[1] // 2
-    layer = tf.keras.layers.Lambda(
-        lambda x: x[:, :_offset, :], name="Extract_sequence_region_INFO"
-    )(layer)
+    _channel = layer.shape[-1]
+
+    if model_config["FULL_TRANSFORMER_OUTPUT"] == False:
+        layer = tf.keras.layers.Lambda(
+            lambda x: x[:, :_offset, :], name="Extract_sequence_region_INFO"
+        )(layer)
+    else:
+        layer = tf.keras.layers.Conv1D(
+            filters=_channel,
+            kernel_size=2,
+            padding="valid",
+            dilation_rate=_offset,
+            name="combine_seq_and_signal",
+        )(layer)
 
     _prediction_head_config = {
         "activation": "relu",

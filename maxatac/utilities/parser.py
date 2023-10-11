@@ -1037,6 +1037,15 @@ def get_parser():
         choices=["random", "peak_centric", "no_map"],
         help="Choose preprocessing map",
     )
+
+    train_parser.add_argument(
+        "--FULL_TRANSFORMER_OUTPUT",
+        dest="FULL_TRANSFORMER_OUTPUT",
+        action="store_true",
+        default=False,
+        help="Whether to use full transformer output or only sequence side of information",
+    )
+
     #############################################
     # Pretrain parser
     #############################################
