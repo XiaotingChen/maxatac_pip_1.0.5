@@ -151,6 +151,7 @@ class MaxATACModel(object):
                 target_scale_factor=self.target_scale_factor,
                 dense_b=self.dense,
                 weights=self.weights,
+                model_config=self.model_config,
             )
 
         elif self.arch == "DCNN_V2_attention":

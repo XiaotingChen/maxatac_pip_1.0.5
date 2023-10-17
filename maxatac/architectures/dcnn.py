@@ -43,7 +43,7 @@ with Mute():
         EMBEDDING_SIZE,
         KEY_DIMS,
     )
-
+    from tensorflow.keras.metrics import MeanMetricWrapper
 
 def loss_function(
     y_true,
@@ -551,6 +551,7 @@ def get_layer(
 
 def get_dilated_cnn(
     output_activation,
+    model_config,
     adam_learning_rate=DEFAULT_ADAM_LEARNING_RATE,
     adam_decay=DEFAULT_ADAM_DECAY,
     input_length=INPUT_LENGTH,
@@ -652,10 +653,20 @@ def get_dilated_cnn(
             lr=adam_learning_rate,
             beta_1=adam_beta_1,
             beta_2=adam_beta_2,
-            decay=adam_decay,
+            weight_decay=adam_decay,
         ),
         loss=loss_function,
         metrics=[dice_coef],
+        weighted_metrics=[
+            MeanMetricWrapper(
+                    dice_coef_class(
+                        flanking_truncation_size=model_config[
+                            "LOSS_FLANKING_TRUNCATION_SIZE"
+                        ]
+                    ),
+                    name="weighted_dice_coef",
+                )
+        ],
     )
 
     logging.debug("Model compiled")
