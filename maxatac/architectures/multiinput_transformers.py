@@ -246,6 +246,64 @@ def get_conv_tower(
     return inbound_layer
 
 
+@tf.keras.utils.register_keras_serializable()
+class Swish(tf.keras.layers.Layer):
+    def __init__(self, beta=1.0, *args, **kwargs):
+        super(Swish, self).__init__(*args, **kwargs)
+        self._beta = beta
+
+    def build(self, input_shape):
+        self.beta = tf.Variable(
+            initial_value=tf.constant(self._beta, dtype="float32"), trainable=True
+        )
+
+    def call(self, inputs):
+        return inputs * tf.sigmoid(self.beta * inputs)
+
+    def get_config(self):
+        config = super().get_config()
+        config.update(
+            {
+                "beta": self._beta,
+            }
+        )
+        return config
+
+
+@tf.keras.utils.register_keras_serializable()
+class SwiGlu(tf.keras.layers.Layer):
+    def __init__(self, beta=1.0, *args, **kwargs):
+        super(SwiGlu, self).__init__(*args, **kwargs)
+        self._beta = beta
+
+    def build(self, input_shape):
+        self.swish = Swish(beta=self._beta)
+        self.W = tf.keras.layers.Dense(
+            units=input_shape[-1],
+            use_bias=True,
+            bias_initializer="glorot_uniform",
+            name=f"{self.name}/W_c",
+        )
+        self.V = tf.keras.layers.Dense(
+            units=input_shape[-1],
+            use_bias=True,
+            bias_initializer="glorot_uniform",
+            name=f"{self.name}/V_c",
+        )
+
+    def call(self, inputs):
+        return self.V(inputs) * self.swish(self.W(inputs))
+
+    def get_config(self):
+        config = super().get_config()
+        config.update(
+            {
+                "beta": self._beta,
+            }
+        )
+        return config
+
+
 def get_positional_encoding(inbound_layer, seq_len, depth, n=10000):
     """
     Return a positional encoding for the transformer,
@@ -510,7 +568,7 @@ def get_multiinput_transformer(
             skip_batch_norm=True,
         )
 
-    atacseq_layer = get_layer(
+    atacseq_layer1 = get_layer(
         inbound_layer=atacseq_layer,
         filters=filters,
         kernel_size=input_kernel_size,
@@ -535,8 +593,8 @@ def get_multiinput_transformer(
         pre_activation=True,
         name="compress_feature_channel_in_genome",
     )
-    atacseq_layer = get_layer(
-        inbound_layer=atacseq_layer,
+    atacseq_layer2 = get_layer(
+        inbound_layer=atacseq_layer1,
         filters=model_config["CONV_TOWER_CONFIGS_FUSION"]["num_filters"],
         kernel_size=input_kernel_size,
         activation="relu",
@@ -564,7 +622,7 @@ def get_multiinput_transformer(
         else None,
     )
     atacseq_layer = get_conv_tower(
-        atacseq_layer,
+        atacseq_layer2,
         model_config["CONV_TOWER_CONFIGS_FUSION"]["atac"],
         model_config["DOWNSAMPLE_METHOD_CONV_TOWER"],
         base_name="ATAC_tower",
@@ -675,31 +733,48 @@ def get_multiinput_transformer(
 
     # Outputs
     layer_dilation_rate = dilation_rate[0]
-    if dense_b:
-        output_layer = get_layer(
-            inbound_layer=layer,
-            filters=output_filters,
-            kernel_size=output_kernel_size,
-            activation=input_activation,
-            padding=padding,
-            dilation_rate=layer_dilation_rate,
-            kernel_initializer=KERNEL_INITIALIZER,
-            skip_batch_norm=True,
-            n=1,
-        )
-    else:
-        output_layer = get_layer(
-            inbound_layer=layer,
-            filters=output_filters,
-            kernel_size=output_kernel_size,
-            activation=output_activation,
-            padding=padding,
-            dilation_rate=layer_dilation_rate,
-            kernel_initializer=KERNEL_INITIALIZER,
-            skip_batch_norm=True,
-            n=1,
-            focal_initializing=model_config["FOCAL_LOSS"],
-        )
+    # if dense_b:
+    #     output_layer = get_layer(
+    #         inbound_layer=layer,
+    #         filters=output_filters,
+    #         kernel_size=output_kernel_size,
+    #         activation=input_activation,
+    #         padding=padding,
+    #         dilation_rate=layer_dilation_rate,
+    #         kernel_initializer=KERNEL_INITIALIZER,
+    #         skip_batch_norm=True,
+    #         n=1,
+    #     )
+    # else:
+    #     output_layer = get_layer(
+    #         inbound_layer=layer,
+    #         filters=_prediction_head_config["num_filters"],
+    #         kernel_size=output_kernel_size,
+    #         activation='linear',
+    #         padding=padding,
+    #         dilation_rate=layer_dilation_rate,
+    #         kernel_initializer=KERNEL_INITIALIZER,
+    #         skip_batch_norm=True,
+    #         n=1,
+    #         focal_initializing=model_config["FOCAL_LOSS"],
+    #     ) # N, 256, 1
+    GMP=tf.keras.layers.GlobalMaxPool1D()
+    #atacseq_layer1_GMP=GMP(atacseq_layer1)
+    atacseq_layer2_GMP=GMP(atacseq_layer2) # N, 64
+    #atacseq_GMP=tf.keras.layers.Concatenate()([atacseq_layer1_GMP,atacseq_layer2_GMP])
+    atacseq_GMP=SwiGlu()(atacseq_layer2_GMP)
+    atacseq_GMP=tf.keras.activations.sigmoid(atacseq_GMP)
+    atacseq_GMP=tf.expand_dims(atacseq_GMP,1) # N, 1, 64
+    #atacseq_GMP=GMP(atacseq_GMP)
+    output_layer_weighted=tf.keras.layers.Multiply()([layer,atacseq_GMP])
+
+    output_layer=tf.keras.layers.Conv1D(filters=output_filters,
+                                        kernel_size=output_kernel_size,
+                                        activation=output_activation,
+                                        padding=padding,
+                                        dilation_rate=layer_dilation_rate,
+                                        kernel_initializer=KERNEL_INITIALIZER,
+                                        )(output_layer_weighted)
 
     # Downsampling from 1024 to 32 (change this) for a dynamic change
     seq_len = output_layer.shape[1]  # should be 256 now
