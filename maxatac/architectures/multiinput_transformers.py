@@ -272,20 +272,21 @@ class Swish(tf.keras.layers.Layer):
 
 @tf.keras.utils.register_keras_serializable()
 class SwiGlu(tf.keras.layers.Layer):
-    def __init__(self, beta=1.0, *args, **kwargs):
+    def __init__(self, beta=1.0, units=None, *args, **kwargs):
         super(SwiGlu, self).__init__(*args, **kwargs)
         self._beta = beta
+        self.units=units
 
     def build(self, input_shape):
         self.swish = Swish(beta=self._beta)
         self.W = tf.keras.layers.Dense(
-            units=input_shape[-1],
+            units=input_shape[-1] if self.units==None else self.units,
             use_bias=True,
             bias_initializer="glorot_uniform",
             name=f"{self.name}/W_c",
         )
         self.V = tf.keras.layers.Dense(
-            units=input_shape[-1],
+            units=input_shape[-1] if self.units==None else self.units,
             use_bias=True,
             bias_initializer="glorot_uniform",
             name=f"{self.name}/V_c",
@@ -758,16 +759,10 @@ def get_multiinput_transformer(
     #         n=1,
     #         focal_initializing=model_config["FOCAL_LOSS"],
     #     ) # N, 256, 1
-    GMP=tf.keras.layers.GlobalMaxPool1D()
-    #atacseq_layer1_GMP=GMP(atacseq_layer1)
-    atacseq_layer2_GMP=GMP(atacseq_layer2) # N, 64
-    #atacseq_GMP=tf.keras.layers.Concatenate()([atacseq_layer1_GMP,atacseq_layer2_GMP])
-    atacseq_GMP=SwiGlu()(atacseq_layer2_GMP)
-    atacseq_GMP=tf.keras.activations.sigmoid(atacseq_GMP)
-    atacseq_GMP=tf.expand_dims(atacseq_GMP,1) # N, 1, 64
-    #atacseq_GMP=GMP(atacseq_GMP)
-    output_layer_weighted=tf.keras.layers.Multiply()([layer,atacseq_GMP])
 
+    atacseq_layer1_compressed=tf.keras.layers.Conv1D(filters=32,kernel_size=4,strides=4, padding='valid')(atacseq_layer1) # N, 1024, 16
+    atacseq_layer1_compressed=SwiGlu(units=_prediction_head_config["num_filters"])(atacseq_layer1_compressed)
+    output_layer_weighted=tf.keras.layers.Multiply()([layer,atacseq_layer1_compressed])
     output_layer=tf.keras.layers.Conv1D(filters=output_filters,
                                         kernel_size=output_kernel_size,
                                         activation=output_activation,
