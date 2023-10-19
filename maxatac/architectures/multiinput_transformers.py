@@ -734,45 +734,31 @@ def get_multiinput_transformer(
 
     # Outputs
     layer_dilation_rate = dilation_rate[0]
-    # if dense_b:
-    #     output_layer = get_layer(
-    #         inbound_layer=layer,
-    #         filters=output_filters,
-    #         kernel_size=output_kernel_size,
-    #         activation=input_activation,
-    #         padding=padding,
-    #         dilation_rate=layer_dilation_rate,
-    #         kernel_initializer=KERNEL_INITIALIZER,
-    #         skip_batch_norm=True,
-    #         n=1,
-    #     )
-    # else:
-    #     output_layer = get_layer(
-    #         inbound_layer=layer,
-    #         filters=_prediction_head_config["num_filters"],
-    #         kernel_size=output_kernel_size,
-    #         activation='linear',
-    #         padding=padding,
-    #         dilation_rate=layer_dilation_rate,
-    #         kernel_initializer=KERNEL_INITIALIZER,
-    #         skip_batch_norm=True,
-    #         n=1,
-    #         focal_initializing=model_config["FOCAL_LOSS"],
-    #     ) # N, 256, 1
-    GMP=tf.keras.layers.GlobalMaxPool1D()
-    atacseq_layer_GMP=GMP(atacseq_layer1)
-    atacseq_layer_GMP=SwiGlu(units=_prediction_head_config["num_filters"])(atacseq_layer_GMP)
-    atacseq_layer_GMP=tf.keras.activations.sigmoid(atacseq_layer_GMP)
-    atacseq_layer_GMP=tf.expand_dims(atacseq_layer_GMP,1) # N, 1, 64
-    output_layer_weighted=tf.keras.layers.Multiply()([layer,atacseq_layer_GMP])
-
-    output_layer=tf.keras.layers.Conv1D(filters=output_filters,
-                                        kernel_size=output_kernel_size,
-                                        activation=output_activation,
-                                        padding=padding,
-                                        dilation_rate=layer_dilation_rate,
-                                        kernel_initializer=KERNEL_INITIALIZER,
-                                        )(output_layer_weighted)
+    if dense_b:
+        output_layer = get_layer(
+            inbound_layer=layer,
+            filters=output_filters,
+            kernel_size=output_kernel_size,
+            activation=input_activation,
+            padding=padding,
+            dilation_rate=layer_dilation_rate,
+            kernel_initializer=KERNEL_INITIALIZER,
+            skip_batch_norm=True,
+            n=1,
+        )
+    else:
+        output_layer = get_layer(
+            inbound_layer=layer,
+            filters=output_filters,
+            kernel_size=output_kernel_size,
+            activation=output_activation,
+            padding=padding,
+            dilation_rate=layer_dilation_rate,
+            kernel_initializer=KERNEL_INITIALIZER,
+            skip_batch_norm=True,
+            n=1,
+            focal_initializing=model_config["FOCAL_LOSS"],
+        )
 
     # Downsampling from 1024 to 32 (change this) for a dynamic change
     seq_len = output_layer.shape[1]  # should be 256 now
