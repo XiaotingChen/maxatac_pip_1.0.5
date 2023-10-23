@@ -146,6 +146,7 @@ def run_training(args):
 
     model_config["FULL_TRANSFORMER_OUTPUT"] = args.FULL_TRANSFORMER_OUTPUT
     model_config["OVERRIDE_ACTIVATION"] = args.OVERRIDE_ACTIVATION
+    model_config["SUPPRESS_CELL_TYPE_SPECIFIC_TN_WEIGHTS"] = args.SUPPRESS_CELL_TYPE_SPECIFIC_TN_WEIGHTS
 
     # Initialize the model with the architecture of choice
     maxatac_model = MaxATACModel(
@@ -344,7 +345,7 @@ def run_training(args):
                     chr_limit=chr_limit,
                     flanking_padding_size=args.flanking_size,
                     override_shrinkage_factor=True,
-                    suppress_cell_type_TN_weight=True,
+                    suppress_cell_type_TN_weight=model_config["SUPPRESS_CELL_TYPE_SPECIFIC_TN_WEIGHTS"],
                 ),
                 output_signature=(
                     tensorflow.TensorSpec(

@@ -1054,6 +1054,15 @@ def get_parser():
         help="Specify activation to override default one",
     )
 
+    train_parser.add_argument(
+        "--SUPPRESS_CELL_TYPE_SPECIFIC_TN_WEIGHTS",
+        dest="SUPPRESS_CELL_TYPE_SPECIFIC_TN_WEIGHTS",
+        action="store_true",
+        default=False,
+        help="Whether to suppress cell type specific TN sample weight",
+    )
+
+
     #############################################
     # Pretrain parser
     #############################################
