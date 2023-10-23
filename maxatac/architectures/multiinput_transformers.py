@@ -127,20 +127,20 @@ def get_conv_block(
     regularization=False,
     l1=0.0,
     l2=0.0,
+    override_activation=None
 ):
     """
     Feed the input through some conv layers.
     This function is very similar to Tareian's get_layer function, with just some slight modification
     """
     for l in range(conv_block_config["num_layer"]):
-        if conv_block_config["activation"] == "gelu":
-            if hasattr(tf.keras.activations, "gelu"):
-                activation = lambda x: tf.keras.activations.gelu(x, approximate=False)
-            else:
-                activation = lambda x: tfa.activations.gelu(x, approximate=False)
+        if override_activation==None:
+            activation = tf.keras.layers.Activation(
+                conv_block_config["activation"], name=base_name + f"_act_{l+1}"
+            )
         else:
             activation = tf.keras.layers.Activation(
-                conv_block_config["activation"], name=base_name + f"_relu_{l+1}"
+                override_activation, name=base_name + f"_act_{l + 1}"
             )
         if pre_activation:
             if l == 0:
@@ -190,6 +190,7 @@ def get_conv_tower(
     suppress_activation=False,
     pre_activation=False,
     residual_connection_dropout_rate=None,
+    override_activation=None
 ):
     """
     Feed the input through the tower of conv layers
@@ -210,8 +211,9 @@ def get_conv_tower(
                     suppress_activation=suppress_activation,
                     pre_activation=pre_activation,
                     dropout_rate=residual_connection_dropout_rate,
+                    override_activation=override_activation
                 ),
-                activation="relu",
+                activation="relu" if override_activation==None else override_activation
             )
         else:
             inbound_layer = get_conv_block(
@@ -221,6 +223,7 @@ def get_conv_tower(
                 use_residual=use_residual,
                 suppress_activation=suppress_activation,
                 pre_activation=pre_activation,
+                override_activation=override_activation
             )
         # print(f"after conv block: {inbound_layer.shape}")
         # After each conv block, use maxpooling to reduce seq len by 2
@@ -586,7 +589,7 @@ def get_multiinput_transformer(
         inbound_layer=genome_layer,
         filters=model_config["CONV_TOWER_CONFIGS_FUSION"]["num_filters"],
         kernel_size=input_kernel_size,
-        activation="relu",
+        activation="relu" if model_config["OVERRIDE_ACTIVATION"]==None else model_config["OVERRIDE_ACTIVATION"],
         padding=padding,
         dilation_rate=1,
         kernel_initializer=KERNEL_INITIALIZER,
@@ -598,7 +601,7 @@ def get_multiinput_transformer(
         inbound_layer=atacseq_layer1,
         filters=model_config["CONV_TOWER_CONFIGS_FUSION"]["num_filters"],
         kernel_size=input_kernel_size,
-        activation="relu",
+        activation="relu" if model_config["OVERRIDE_ACTIVATION"]==None else model_config["OVERRIDE_ACTIVATION"],
         padding=padding,
         dilation_rate=1,
         kernel_initializer=KERNEL_INITIALIZER,
@@ -621,6 +624,7 @@ def get_multiinput_transformer(
         ]
         if model_config["SUPPRESS_DROPOUT"] == False
         else None,
+        override_activation=model_config["OVERRIDE_ACTIVATION"]
     )
     atacseq_layer = get_conv_tower(
         atacseq_layer2,
@@ -635,6 +639,7 @@ def get_multiinput_transformer(
         ]
         if model_config["SUPPRESS_DROPOUT"] == False
         else None,
+        override_activation=model_config["OVERRIDE_ACTIVATION"]
     )
 
     # genome_layer and atacseq_layer now should have shape (batch, seq_len, mha_embed_dim // 2)
@@ -730,35 +735,47 @@ def get_multiinput_transformer(
         regularization=model_config["REGULARIZATION"],
         l1=model_config["ELASTIC_L1"],
         l2=model_config["ELASTIC_L2"],
+        override_activation=model_config["OVERRIDE_ACTIVATION"]
     )
 
     # Outputs
     layer_dilation_rate = dilation_rate[0]
-    if dense_b:
-        output_layer = get_layer(
-            inbound_layer=layer,
-            filters=output_filters,
-            kernel_size=output_kernel_size,
-            activation=input_activation,
-            padding=padding,
-            dilation_rate=layer_dilation_rate,
-            kernel_initializer=KERNEL_INITIALIZER,
-            skip_batch_norm=True,
-            n=1,
-        )
-    else:
-        output_layer = get_layer(
-            inbound_layer=layer,
-            filters=output_filters,
-            kernel_size=output_kernel_size,
-            activation=output_activation,
-            padding=padding,
-            dilation_rate=layer_dilation_rate,
-            kernel_initializer=KERNEL_INITIALIZER,
-            skip_batch_norm=True,
-            n=1,
-            focal_initializing=model_config["FOCAL_LOSS"],
-        )
+    # if dense_b:
+    #     output_layer = get_layer(
+    #         inbound_layer=layer,
+    #         filters=output_filters,
+    #         kernel_size=output_kernel_size,
+    #         activation=input_activation,
+    #         padding=padding,
+    #         dilation_rate=layer_dilation_rate,
+    #         kernel_initializer=KERNEL_INITIALIZER,
+    #         skip_batch_norm=True,
+    #         n=1,
+    #     )
+    # else:
+    #     output_layer = get_layer(
+    #         inbound_layer=layer,
+    #         filters=_prediction_head_config["num_filters"],
+    #         kernel_size=output_kernel_size,
+    #         activation='linear',
+    #         padding=padding,
+    #         dilation_rate=layer_dilation_rate,
+    #         kernel_initializer=KERNEL_INITIALIZER,
+    #         skip_batch_norm=True,
+    #         n=1,
+    #         focal_initializing=model_config["FOCAL_LOSS"],
+    #     ) # N, 256, 1
+
+    atacseq_layer1_compressed=tf.keras.layers.Conv1D(filters=32,kernel_size=4,strides=4, padding='valid')(atacseq_layer1) # N, 1024, 16
+    atacseq_layer1_compressed=SwiGlu(units=_prediction_head_config["num_filters"])(atacseq_layer1_compressed)
+    output_layer_weighted=tf.keras.layers.Multiply()([layer,atacseq_layer1_compressed])
+    output_layer=tf.keras.layers.Conv1D(filters=output_filters,
+                                        kernel_size=output_kernel_size,
+                                        activation=output_activation,
+                                        padding=padding,
+                                        dilation_rate=layer_dilation_rate,
+                                        kernel_initializer=KERNEL_INITIALIZER,
+                                        )(output_layer_weighted)
 
     # Downsampling from 1024 to 32 (change this) for a dynamic change
     seq_len = output_layer.shape[1]  # should be 256 now

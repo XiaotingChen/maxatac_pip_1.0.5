@@ -145,6 +145,7 @@ def run_training(args):
     model_config["SHUFFLE_AUGMENTATION"] = args.SHUFFLE_AUGMENTATION
 
     model_config["FULL_TRANSFORMER_OUTPUT"] = args.FULL_TRANSFORMER_OUTPUT
+    model_config["OVERRIDE_ACTIVATION"] = args.OVERRIDE_ACTIVATION
 
     # Initialize the model with the architecture of choice
     maxatac_model = MaxATACModel(

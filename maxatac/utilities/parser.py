@@ -1046,6 +1046,14 @@ def get_parser():
         help="Whether to use full transformer output or only sequence side of information",
     )
 
+    train_parser.add_argument(
+        "--OVERRIDE_ACTIVATION",
+        dest="OVERRIDE_ACTIVATION",
+        action="store",
+        default=None,
+        help="Specify activation to override default one",
+    )
+
     #############################################
     # Pretrain parser
     #############################################
