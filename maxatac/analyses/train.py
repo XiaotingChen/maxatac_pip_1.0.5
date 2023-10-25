@@ -83,13 +83,11 @@ def run_training(args):
     gpus = tensorflow.config.list_physical_devices("GPU")
     if gpus:
         try:
-            # Currently, memory growth needs to be the same across GPUs
             for gpu in gpus:
                 tensorflow.config.experimental.set_memory_growth(gpu, True)
             logical_gpus = tensorflow.config.list_logical_devices("GPU")
             print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
         except RuntimeError as e:
-            # Memory growth must be set before GPUs have been initialized
             print(e)
 
     if tensorflow.test.gpu_device_name():
@@ -206,36 +204,9 @@ def run_training(args):
             validate_examples.ROI_pool.shape[0] // args.batch_size
         )  # under a fixed ratio of 5, we are probably just under-sample to 1/3 of the total background
 
-        # Save metadata
-        save_metadata(
-            args.output,
-            args,
-            model_config,
-            extra={
-                "training CHIP ROI total regions": train_examples.ROI_pool_CHIP.shape[
-                    0
-                ],
-                "training ATAC ROI total regions": train_examples.ROI_pool_ATAC.shape[
-                    0
-                ],
-                "validate CHIP ROI total regions": validate_examples.ROI_pool_CHIP.shape[
-                    0
-                ],
-                "validate ATAC ROI total regions": validate_examples.ROI_pool_ATAC.shape[
-                    0
-                ],
-                "training CHIP ROI unique regions": train_examples.ROI_pool_unique_region_size_CHIP,
-                "training ATAC ROI unique regions": train_examples.ROI_pool_unique_region_size_ATAC,
-                "validate CHIP ROI unique regions": validate_examples.ROI_pool_unique_region_size_CHIP,
-                "validate ATAC ROI unique regions": validate_examples.ROI_pool_unique_region_size_ATAC,
-                "batch size": args.batch_size,
-                "training batches per epoch": steps_per_epoch_v2,
-                "validation batches per epoch": validation_steps_v2,
-                "total epochs": args.epochs,
-                "ATAC_Sampling_Multiplier": args.ATAC_Sampling_Multiplier,
-                "CHIP_Sample_Weight_Baseline": args.CHIP_Sample_Weight_Baseline,
-            },
-        )
+        # override max epoch when training sample upper bound is available
+        if args.training_sample_upper_bound != 0:
+            args.epochs = int(min(args.epochs, int(args.training_sample_upper_bound // (steps_per_epoch_v2 * args.batch_size))))
 
         # annotate CHIP ROI with additional sample weight adjustment
         train_examples.ROI_pool_CHIP = CHIP_sample_weight_adjustment(
@@ -436,8 +407,8 @@ def run_training(args):
             train_data_chip = train_data_chip.concatenate(chip_tfds[k])
 
     # re-assign steps_per_epoch_v2 here
-    steps_per_epoch_v2 = train_data_chip.cardinality().numpy() // np.ceil(
-        (args.batch_size / (1.0 + float(args.ATAC_Sampling_Multiplier)))
+    steps_per_epoch_v2 = int(train_data_chip.cardinality().numpy() // np.ceil(
+        (args.batch_size / (1.0 + float(args.ATAC_Sampling_Multiplier))))
     )
 
     train_data = (
@@ -490,6 +461,37 @@ def run_training(args):
             deterministic=False,
         )
         .prefetch(tensorflow.data.AUTOTUNE)
+    )
+
+    # Save metadata
+    save_metadata(
+        args.output,
+        args,
+        model_config,
+        extra={
+            "training CHIP ROI total regions": train_examples.ROI_pool_CHIP.shape[
+                0
+            ],
+            "training ATAC ROI total regions": train_examples.ROI_pool_ATAC.shape[
+                0
+            ],
+            "validate CHIP ROI total regions": validate_examples.ROI_pool_CHIP.shape[
+                0
+            ],
+            "validate ATAC ROI total regions": validate_examples.ROI_pool_ATAC.shape[
+                0
+            ],
+            "training CHIP ROI unique regions": train_examples.ROI_pool_unique_region_size_CHIP,
+            "training ATAC ROI unique regions": train_examples.ROI_pool_unique_region_size_ATAC,
+            "validate CHIP ROI unique regions": validate_examples.ROI_pool_unique_region_size_CHIP,
+            "validate ATAC ROI unique regions": validate_examples.ROI_pool_unique_region_size_ATAC,
+            "batch size": args.batch_size,
+            "training batches per epoch": steps_per_epoch_v2,
+            "validation batches per epoch": validation_steps_v2,
+            "total epochs": args.epochs,
+            "ATAC_Sampling_Multiplier": args.ATAC_Sampling_Multiplier,
+            "CHIP_Sample_Weight_Baseline": args.CHIP_Sample_Weight_Baseline,
+        },
     )
 
     # Fit the model

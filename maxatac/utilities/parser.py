@@ -1062,6 +1062,13 @@ def get_parser():
         help="Whether to suppress cell type specific TN sample weight",
     )
 
+    train_parser.add_argument(
+        "--training_sample_upper_bound",
+        dest="training_sample_upper_bound",
+        type=int,
+        default=11_000_000,
+        help="Maximum number of data samples for training, override epochs option, set to 0 to disable.",
+    )
 
     #############################################
     # Pretrain parser
