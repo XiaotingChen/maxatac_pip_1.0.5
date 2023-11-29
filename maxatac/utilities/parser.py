@@ -1070,6 +1070,14 @@ def get_parser():
         help="Maximum number of data samples for training, override epochs option, set to 0 to disable.",
     )
 
+    train_parser.add_argument(
+        "--dice_unknown_coef",
+        dest="dice_unknown_coef",
+        type=int,
+        default=10,
+        help="Set dice coef's unknown_coef parameter.",
+    )
+
     #############################################
     # Pretrain parser
     #############################################

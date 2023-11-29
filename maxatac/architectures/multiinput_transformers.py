@@ -897,7 +897,8 @@ def get_multiinput_transformer(
                     dice_coef_class(
                         flanking_truncation_size=model_config[
                             "LOSS_FLANKING_TRUNCATION_SIZE"
-                        ]
+                        ],
+                        unknown_coef= model_config['dice_unknown_coef']
                     ),
                     name="dice_coef",
                 )
@@ -917,7 +918,8 @@ def get_multiinput_transformer(
                     dice_coef_class(
                         flanking_truncation_size=model_config[
                             "LOSS_FLANKING_TRUNCATION_SIZE"
-                        ]
+                        ],
+                        unknown_coef= model_config['dice_unknown_coef']
                     ),
                     name="dice_coef",
                 )

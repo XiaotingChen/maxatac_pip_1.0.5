@@ -145,6 +145,7 @@ def run_training(args):
     model_config["FULL_TRANSFORMER_OUTPUT"] = args.FULL_TRANSFORMER_OUTPUT
     model_config["OVERRIDE_ACTIVATION"] = args.OVERRIDE_ACTIVATION
     model_config["SUPPRESS_CELL_TYPE_SPECIFIC_TN_WEIGHTS"] = args.SUPPRESS_CELL_TYPE_SPECIFIC_TN_WEIGHTS
+    model_config['dice_unknown_coef']=args.dice_unknown_coef
 
     # Initialize the model with the architecture of choice
     maxatac_model = MaxATACModel(
