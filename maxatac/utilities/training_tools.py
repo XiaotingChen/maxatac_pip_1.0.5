@@ -30,6 +30,7 @@ from maxatac.utilities.constants import (
     CHR_POOL_SIZE,
     INPUT_LENGTH,
     INPUT_CHANNELS,
+    OUTPUT_LENGTH,
     BP_ORDER,
     TRAIN_SCALE_SIGNAL,
     BLACKLISTED_REGIONS,
@@ -151,6 +152,7 @@ class MaxATACModel(object):
                 target_scale_factor=self.target_scale_factor,
                 dense_b=self.dense,
                 weights=self.weights,
+                model_config=self.model_config,
             )
 
 
@@ -798,17 +800,342 @@ def create_roi_batch_v2(
                 split_targets = np.array(np.split(target_vector, n_bins, axis=0))
 
                 bin_sums = np.sum(split_targets, axis=1)
-                bin_vector = np.where(bin_sums > 0.5 * bp_resolution, 1.0, 0.0) # why no clipping here but have so in the loss func
+                bin_vector = np.where(
+                    bin_sums > 0.5 * bp_resolution, 1.0, 0.0
+                )  # why no clipping here but have so in the loss func
 
                 # Append the sample to the target batch
                 targets_batch.append(bin_vector)
                 weight_batch.append(1.0)
 
         # shuffle all the batch matrices
-        n_roi_order=np.arange(n_roi)
+        n_roi_order = np.arange(n_roi)
         np.random.shuffle(n_roi_order)
 
-        yield np.array(inputs_batch)[n_roi_order], np.array(targets_batch)[n_roi_order], np.array(weight_batch)[n_roi_order]
+        yield np.array(inputs_batch)[n_roi_order], np.array(targets_batch)[
+            n_roi_order
+        ], np.array(weight_batch)[n_roi_order]
+
+
+class DataGen:
+    def __init__(
+        self,
+        sequence,
+        meta_table,
+        roi_pool,
+        bp_resolution=BP_RESOLUTION,
+        target_scale_factor=1,
+        chip=True,
+        cell_type=None,
+        atac_sampling_multiplier=5,
+        chip_sample_weight_baseline=5,
+        batch_size=1024,
+        shuffle=True,
+        chr_limit={},
+        flanking_padding_size=512,
+        window_size=INPUT_LENGTH,
+        override_shrinkage_factor=False,
+        suppress_cell_type_TN_weight=False
+    ):
+        "Initialization"
+        self.roi_pool = roi_pool.copy()
+        self.sequence = sequence
+        self.meta_table = meta_table
+        self.cell_type = cell_type
+        self.chip = chip
+        self.bp_resolution = bp_resolution
+        self.target_scale_factor = target_scale_factor
+        self.atac_sampling_multiplier = atac_sampling_multiplier
+        self.chip_sample_weight_baseline = chip_sample_weight_baseline
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+        self.chr_limit = chr_limit
+        self.flanking_padding_size = flanking_padding_size
+        self.window_size = window_size
+        self.override_shrinkage_factor = override_shrinkage_factor
+        self.suppress_cell_type_TN_weight=suppress_cell_type_TN_weight
+
+        if self.chip == False:
+            self.roi_pool["Weight shrinkage factor"] = 1.0 / float(
+                self.chip_sample_weight_baseline
+            )
+        if self.override_shrinkage_factor:
+            self.roi_pool["Weight shrinkage factor"] = 1.0
+        self.roi_pool.reset_index(drop=True, inplace=True)
+        self.total_size = self.roi_pool.shape[0]
+        self.indexes = np.arange(self.total_size)
+        if self.shuffle == True:
+            np.random.shuffle(self.indexes)
+
+    def __len__(self):
+        "Denotes the number of batches per epoch"
+        return int(np.floor(self.total_size / self.batch_size))
+
+    def get_item(self, index):
+        X, y, w = self.__data_generation(index)
+        return X, y, w
+
+    def __call__(self):
+        for index in np.arange(self.total_size):
+            yield self.get_item(index)
+
+    def __data_generation(self, index):
+        "Generates data containing batch_size samples"
+
+        # Initialization
+        # Extract the signal for every sample
+        roi_row = self.roi_pool.iloc[index : index + 1, :]
+
+        if self.cell_type != None:
+            cell_line = self.cell_type  # pre-defined cell type
+        else:
+            cell_line = roi_row["Cell_Line"].values[0]
+
+        # Get the paths for the cell type of interest.
+        meta_row = self.meta_table[(self.meta_table["Cell_Line"] == cell_line)]
+        meta_row = meta_row.reset_index(drop=True)
+
+        # Rename some variables. This just helps clean up code downstream
+        chrom_name = roi_row["Chr"].values[0]
+        start = int(roi_row["Start"].values[0]) - self.flanking_padding_size
+        end = int(roi_row["Stop"].values[0]) + self.flanking_padding_size
+
+        if start < 0:
+            start = 0
+            end = start + (self.window_size + 2 * self.flanking_padding_size)
+        if end >= self.chr_limit[chrom_name]:
+            end = self.chr_limit[chrom_name] - 1
+            start = end - (self.window_size + 2 * self.flanking_padding_size)
+
+        weight_shrinkage_factor = float(roi_row["Weight shrinkage factor"].values[0])
+
+        # given cell type
+        signal = meta_row.loc[0, "ATAC_Signal_File"]
+        binding = meta_row.loc[0, "Binding_File"]
+
+        with load_2bit(self.sequence) as sequence_stream, load_bigwig(
+            signal
+        ) as signal_stream, load_bigwig(binding) as binding_stream:
+            # Get the input matrix of values and one-hot encoded sequence
+            input_matrix = get_input_matrix(
+                signal_stream=signal_stream,
+                sequence_stream=sequence_stream,
+                chromosome=chrom_name,
+                start=start,
+                end=end,
+                use_complement=False,
+                reverse_matrix=False,
+                rows=INPUT_CHANNELS,
+                cols=self.window_size + 2 * self.flanking_padding_size,
+            )
+
+            # Append the sample to the inputs batch.
+            # inputs_batch.append(input_matrix)
+
+            # Some bigwig files do not have signal for some chromosomes because they do not have peaks
+            # in those regions
+            # Our workaround for issue#42 is to provide a zero matrix for that position
+            try:
+                # Get the target matrix
+                target_vector = np.array(
+                    binding_stream.values(chrom_name, start, end)
+                ).T
+
+            except:
+                target_vector = np.zeros(
+                    self.window_size + 2 * self.flanking_padding_size
+                )
+
+            # change nan to numbers
+            target_vector = np.nan_to_num(target_vector, 0.0)
+
+            # get the number of 32 bp bins across the input sequence
+            n_bins = int(target_vector.shape[0] / self.bp_resolution)
+
+            # Split the data up into 64 x 32 bp bins.
+            split_targets = np.array(np.split(target_vector, n_bins, axis=0))
+
+            bin_sums = np.sum(split_targets, axis=1)
+            bin_vector = np.where(bin_sums > 0.5 * self.bp_resolution, 1.0, 0.0)
+
+            if self.suppress_cell_type_TN_weight:
+                bin_vector_sum = np.sum(bin_vector)
+                if bin_vector_sum==0:
+                    weight_shrinkage_factor=1.0/float(self.chip_sample_weight_baseline) # so this gets sample_weight back to 1 for cell type specific TN samples
+
+            # Append the sample to the target batch
+            # targets_batch.append(bin_vector)
+            # weight_batch.append(
+            #     float(self.chip_sample_weight_baseline) * weight_shrinkage_factor
+            # )
+
+            # sequence_input_matrix = np.array(input_matrix)[:, :4]
+            # signal_input_matrix = np.array(input_matrix)[:, 4:]
+
+        return (
+            input_matrix,
+            np.array(bin_vector),
+            np.array(float(self.chip_sample_weight_baseline) * weight_shrinkage_factor),
+        )
+
+
+class ValidDataGen:
+    def __init__(
+        self,
+        sequence,
+        meta_table,
+        roi_pool_atac,
+        roi_pool_chip,
+        cell_type_list,
+        bp_resolution=BP_RESOLUTION,
+        target_scale_factor=1,
+        atac_sampling_multiplier=5,
+        chip_sample_weight_baseline=5,
+        batch_size=1024,
+        shuffle=True,
+        chr_limit={},
+        flanking_padding_size=512,
+        window_size=INPUT_LENGTH,
+        override_chip_shrinkage_factor=False,
+    ):
+        "Initialization"
+        self.roi_pool_chip = roi_pool_chip.copy()
+        self.roi_pool_atac = roi_pool_atac.copy()
+        self.sequence = sequence
+        self.meta_table = meta_table
+        self.cell_type_list = cell_type_list
+        self.bp_resolution = bp_resolution
+        self.target_scale_factor = target_scale_factor
+        self.atac_sampling_multiplier = atac_sampling_multiplier
+        self.chip_sample_weight_baseline = chip_sample_weight_baseline
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+        self.chr_limit = chr_limit
+        self.flanking_padding_size = flanking_padding_size
+        self.window_size = window_size
+        self.override_chip_shrinkage_factor = override_chip_shrinkage_factor
+
+        self.roi_pool_atac["Weight shrinkage factor"] = 1.0 / float(
+            self.chip_sample_weight_baseline
+        )
+        if self.override_chip_shrinkage_factor:
+            self.roi_pool_chip["Weight shrinkage factor"] = 1.0
+
+        _total_size = self.roi_pool_chip.shape[0] + self.roi_pool_atac.shape[0]
+        _number_to_drop = _total_size % self.batch_size
+        self.roi_pool_atac.reset_index(drop=True, inplace=True)
+        _idx_to_drop = np.random.choice(
+            np.arange(self.roi_pool_atac.shape[0]), size=_number_to_drop, replace=False
+        )
+        self.roi_pool_atac.drop(_idx_to_drop, axis=0, inplace=True)
+        # need to drop a few in atac roi to enforce all chip samples in the evaluation
+        self.roi_pool = pd.concat([self.roi_pool_atac, self.roi_pool_chip])
+        self.roi_pool.reset_index(drop=True, inplace=True)
+        self.total_size = self.roi_pool.shape[0]
+        self.indexes = np.arange(self.total_size)
+        if self.shuffle == True:
+            np.random.shuffle(self.indexes)
+
+    def __len__(self):
+        "Denotes the number of batches per epoch"
+        return int(np.floor(self.total_size / self.batch_size))
+
+    def get_item(self, index):
+        X, y, w = self.__data_generation(index)
+        return X, y, w
+
+    def __call__(self):
+        for index in np.arange(self.total_size):
+            yield self.get_item(index)
+
+    def __data_generation(self, index):
+        "Generates data containing batch_size samples"
+
+        # Initialization
+        # Extract the signal for every sample
+        roi_row = self.roi_pool.iloc[index : index + 1, :]
+        cell_line = roi_row["Cell_Line"].values[0]
+
+        # Get the paths for the cell type of interest.
+        meta_row = self.meta_table[(self.meta_table["Cell_Line"] == cell_line)]
+        meta_row = meta_row.reset_index(drop=True)
+
+        # Rename some variables. This just helps clean up code downstream
+        chrom_name = roi_row["Chr"].values[0]
+        start = int(roi_row["Start"].values[0]) - self.flanking_padding_size
+        end = int(roi_row["Stop"].values[0]) + self.flanking_padding_size
+
+        if start < 0:
+            start = 0
+            end = start + (self.window_size + 2 * self.flanking_padding_size)
+        if end >= self.chr_limit[chrom_name]:
+            end = self.chr_limit[chrom_name] - 1
+            start = end - (self.window_size + 2 * self.flanking_padding_size)
+
+        weight_shrinkage_factor = float(roi_row["Weight shrinkage factor"].values[0])
+
+        signal = meta_row.loc[0, "ATAC_Signal_File"]
+        binding = meta_row.loc[0, "Binding_File"]
+
+        with load_2bit(self.sequence) as sequence_stream, load_bigwig(
+            signal
+        ) as signal_stream, load_bigwig(binding) as binding_stream:
+            # Get the input matrix of values and one-hot encoded sequence
+            input_matrix = get_input_matrix(
+                signal_stream=signal_stream,
+                sequence_stream=sequence_stream,
+                chromosome=chrom_name,
+                start=start,
+                end=end,
+                use_complement=False,
+                reverse_matrix=False,
+                rows=INPUT_CHANNELS,
+                cols=self.window_size + 2 * self.flanking_padding_size,
+            )
+
+            # Append the sample to the inputs batch.
+            # inputs_batch.append(input_matrix)
+
+            # Some bigwig files do not have signal for some chromosomes because they do not have peaks
+            # in those regions
+            # Our workaround for issue#42 is to provide a zero matrix for that position
+            try:
+                # Get the target matrix
+                target_vector = np.array(
+                    binding_stream.values(chrom_name, start, end)
+                ).T
+
+            except:
+                target_vector = np.zeros(
+                    self.window_size + 2 * self.flanking_padding_size
+                )
+
+            # change nan to numbers
+            target_vector = np.nan_to_num(target_vector, 0.0)
+
+            # get the number of 32 bp bins across the input sequence
+            n_bins = int(target_vector.shape[0] / self.bp_resolution)
+
+            # Split the data up into 32 x 32 bp bins.
+            split_targets = np.array(np.split(target_vector, n_bins, axis=0))
+
+            bin_sums = np.sum(split_targets, axis=1)
+            bin_vector = np.where(bin_sums > 0.5 * self.bp_resolution, 1.0, 0.0)
+
+            # Append the sample to the target batch
+            # targets_batch.append(bin_vector)
+            # weight_batch.append(
+            #     float(self.chip_sample_weight_baseline) * weight_shrinkage_factor
+            # )
+
+            # sequence_input_matrix = np.array(input_matrix)[:, :4]
+            # signal_input_matrix = np.array(input_matrix)[:, 4:]
+
+        return (
+            input_matrix,
+            np.array(bin_vector),
+            np.array(float(self.chip_sample_weight_baseline) * weight_shrinkage_factor),
+        )
 
 
 def create_random_batch(
@@ -1435,9 +1762,10 @@ def save_metadata(output_dir, args, model_config=None, extra=None):
         with open(os.path.join(output_dir, "model_config.json"), "w") as f:
             json.dump(model_config, f, sort_keys=False, indent=3)
 
-    if extra!=None:
+    if extra != None:
         with open(os.path.join(output_dir, "sample_stats.json"), "w") as f:
             json.dump(extra, f, sort_keys=False, indent=3)
+
 
 def get_initializer(initializer_name):
     """
@@ -1475,3 +1803,48 @@ def CHIP_sample_weight_adjustment(CHIP_roi_df):
         ["Chr", "Start", "Stop", "ROI_Type", "Cell_Line", "Weight shrinkage factor"]
     ]
 
+
+
+# def peak_centric_map(x, y, w):
+#     return x[512:-512, :], y[16:-16], w
+#
+#
+# def random_shuffling_map(x, y, w):
+#     shift = np.random.randint(low=0, high=INPUT_LENGTH)
+#     y_shift = int(np.floor(shift / 32))
+#     return x[shift : shift + INPUT_LENGTH, :], y[y_shift : y_shift + OUTPUT_LENGTH], w
+
+
+def peak_centric_map_tf(x, y, w):
+    shift = tf.constant(512, dtype=tf.int32)
+    y_shift = tf.cast(tf.math.divide_no_nan(shift, OUTPUT_LENGTH), dtype=tf.int32)
+    _length = tf.shape(x)[0]
+    _dim = tf.shape(x)[1]
+
+    return (
+        tf.slice(x, begin=[shift, 0], size=[INPUT_LENGTH, _dim]),
+        tf.slice(y, begin=[y_shift], size=[OUTPUT_LENGTH]),
+        w,
+    )
+
+
+def random_shuffling_map_tf(x, y, w):
+    shift = tf.random.uniform([1], minval=0, maxval=INPUT_LENGTH, dtype=tf.int32)[0]
+    y_shift = tf.cast(tf.math.divide_no_nan(shift, OUTPUT_LENGTH), dtype=tf.int32)
+    _length = tf.shape(x)[0]
+    _dim = tf.shape(x)[1]
+
+    return (
+        tf.slice(x, begin=[shift, 0], size=[INPUT_LENGTH, _dim]),
+        tf.slice(y, begin=[y_shift], size=[OUTPUT_LENGTH]),
+        w,
+    )
+
+def no_mapping_tf(x,y,w):
+  return x,y,w
+
+dataset_mapping = {
+    'random': random_shuffling_map_tf,
+    'peak_centric': peak_centric_map_tf,
+    'no_map':no_mapping_tf
+}

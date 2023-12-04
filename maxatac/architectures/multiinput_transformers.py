@@ -34,6 +34,7 @@ with Mute():
         KERNEL_INITIALIZER,
         INPUT_LENGTH,
         INPUT_CHANNELS,
+        DNA_INPUT_CHANNELS,
         INPUT_FILTERS,
         INPUT_KERNEL_SIZE,
         INPUT_ACTIVATION,
@@ -60,17 +61,24 @@ with Mute():
         DEFAULT_COSINEDECAYRESTARTS_T_MUL,
         DEFAULT_COSINEDECAYRESTARTS_M_MUL,
         DEFAULT_COSINEDECAYRESTARTS_INITIAL_LR_MULTIPLIER,
+        DEFAULT_COSINEDECAY_DECAY_STEPS,
+        DEFAULT_COSINEDECAY_ALPHA,
+        DEFAULT_COSINEDECAY_WARMUP_TARGET_MULTIPLIER,
+        DEFAULT_COSINEDECAY_WARMUP_STEPS,
     )
 
     from maxatac.architectures.dcnn import (
         loss_function,
         loss_function_focal_class,
         dice_coef,
+        dice_coef_class,
+        loss_function_class,
         get_layer,
         get_residual_layer,
     )
     from maxatac.architectures.attention_module_TF import TransformerBlock
     import tensorflow_addons as tfa
+    from tensorflow.keras.metrics import MeanMetricWrapper
 
 
 def get_inception_block(inbound_layer, inception_branches, base_name):
@@ -116,20 +124,23 @@ def get_conv_block(
     use_residual=False,
     suppress_activation=False,
     pre_activation=False,
+    regularization=False,
+    l1=0.0,
+    l2=0.0,
+    override_activation=None
 ):
     """
     Feed the input through some conv layers.
     This function is very similar to Tareian's get_layer function, with just some slight modification
     """
     for l in range(conv_block_config["num_layer"]):
-        if conv_block_config["activation"] == "gelu":
-            if hasattr(tf.keras.activations, "gelu"):
-                activation = tf.keras.activations.gelu(x, approximate=False)
-            else:
-                activation = tfa.activations.gelu(x, approximate=False)
+        if override_activation==None:
+            activation = tf.keras.layers.Activation(
+                conv_block_config["activation"], name=base_name + f"_act_{l+1}"
+            )
         else:
             activation = tf.keras.layers.Activation(
-                conv_block_config["activation"], name=base_name + f"_relu_{l+1}"
+                override_activation, name=base_name + f"_act_{l + 1}"
             )
         if pre_activation:
             if l == 0:
@@ -144,6 +155,9 @@ def get_conv_block(
                 strides=conv_block_config["stride"],
                 activation="linear",
                 name=base_name + f"_conv_layer_{l+1}",
+                kernel_regularizer=tf.keras.regularizers.L1L2(l1, l2)
+                if regularization
+                else None,
             )(inbound_layer)
         else:
             inbound_layer = Conv1D(
@@ -176,6 +190,7 @@ def get_conv_tower(
     suppress_activation=False,
     pre_activation=False,
     residual_connection_dropout_rate=None,
+    override_activation=None
 ):
     """
     Feed the input through the tower of conv layers
@@ -196,8 +211,9 @@ def get_conv_tower(
                     suppress_activation=suppress_activation,
                     pre_activation=pre_activation,
                     dropout_rate=residual_connection_dropout_rate,
+                    override_activation=override_activation
                 ),
-                activation="relu",
+                activation="relu" if override_activation==None else override_activation
             )
         else:
             inbound_layer = get_conv_block(
@@ -207,6 +223,7 @@ def get_conv_tower(
                 use_residual=use_residual,
                 suppress_activation=suppress_activation,
                 pre_activation=pre_activation,
+                override_activation=override_activation
             )
         # print(f"after conv block: {inbound_layer.shape}")
         # After each conv block, use maxpooling to reduce seq len by 2
@@ -230,6 +247,65 @@ def get_conv_tower(
             inbound_layer = BatchNormalization()(inbound_layer)
 
     return inbound_layer
+
+
+@tf.keras.utils.register_keras_serializable()
+class Swish(tf.keras.layers.Layer):
+    def __init__(self, beta=1.0, *args, **kwargs):
+        super(Swish, self).__init__(*args, **kwargs)
+        self._beta = beta
+
+    def build(self, input_shape):
+        self.beta = tf.Variable(
+            initial_value=tf.constant(self._beta, dtype="float32"), trainable=True
+        )
+
+    def call(self, inputs):
+        return inputs * tf.sigmoid(self.beta * inputs)
+
+    def get_config(self):
+        config = super().get_config()
+        config.update(
+            {
+                "beta": self._beta,
+            }
+        )
+        return config
+
+
+@tf.keras.utils.register_keras_serializable()
+class SwiGlu(tf.keras.layers.Layer):
+    def __init__(self, beta=1.0, units=None, *args, **kwargs):
+        super(SwiGlu, self).__init__(*args, **kwargs)
+        self._beta = beta
+        self.units=units
+
+    def build(self, input_shape):
+        self.swish = Swish(beta=self._beta)
+        self.W = tf.keras.layers.Dense(
+            units=input_shape[-1] if self.units==None else self.units,
+            use_bias=True,
+            bias_initializer="glorot_uniform",
+            name=f"{self.name}/W_c",
+        )
+        self.V = tf.keras.layers.Dense(
+            units=input_shape[-1] if self.units==None else self.units,
+            use_bias=True,
+            bias_initializer="glorot_uniform",
+            name=f"{self.name}/V_c",
+        )
+
+    def call(self, inputs):
+        return self.V(inputs) * self.swish(self.W(inputs))
+
+    def get_config(self):
+        config = super().get_config()
+        config.update(
+            {
+                "beta": self._beta,
+            }
+        )
+        return config
 
 
 def get_positional_encoding(inbound_layer, seq_len, depth, n=10000):
@@ -395,8 +471,16 @@ def get_multiinput_transformer(
     logging.debug("Building Dilated CNN model")
 
     # Current there are two inputs: one for the genome sequence, one for the ATAC-seq signal
-    genome_input = Input(shape=(input_length, 4), name="genome")
-    atacseq_input = Input(shape=(input_length, 1), name="atac")
+    _input = Input(
+        shape=(input_length, INPUT_CHANNELS),
+    )
+
+    genome_input = tf.keras.layers.Lambda(
+        lambda x: x[:, :, :DNA_INPUT_CHANNELS], name="genome"
+    )(_input)
+    atacseq_input = tf.keras.layers.Lambda(
+        lambda x: x[:, :, DNA_INPUT_CHANNELS:], name="atac"
+    )(_input)
 
     # The current feature dim to the transformer is 64
     # Using 2 inputs, each input will be transformed to feature dim of 32
@@ -488,7 +572,7 @@ def get_multiinput_transformer(
             skip_batch_norm=True,
         )
 
-    atacseq_layer = get_layer(
+    atacseq_layer1 = get_layer(
         inbound_layer=atacseq_layer,
         filters=filters,
         kernel_size=input_kernel_size,
@@ -505,7 +589,7 @@ def get_multiinput_transformer(
         inbound_layer=genome_layer,
         filters=model_config["CONV_TOWER_CONFIGS_FUSION"]["num_filters"],
         kernel_size=input_kernel_size,
-        activation="relu",
+        activation="relu" if model_config["OVERRIDE_ACTIVATION"]==None else model_config["OVERRIDE_ACTIVATION"],
         padding=padding,
         dilation_rate=1,
         kernel_initializer=KERNEL_INITIALIZER,
@@ -513,11 +597,11 @@ def get_multiinput_transformer(
         pre_activation=True,
         name="compress_feature_channel_in_genome",
     )
-    atacseq_layer = get_layer(
-        inbound_layer=atacseq_layer,
+    atacseq_layer2 = get_layer(
+        inbound_layer=atacseq_layer1,
         filters=model_config["CONV_TOWER_CONFIGS_FUSION"]["num_filters"],
         kernel_size=input_kernel_size,
-        activation="relu",
+        activation="relu" if model_config["OVERRIDE_ACTIVATION"]==None else model_config["OVERRIDE_ACTIVATION"],
         padding=padding,
         dilation_rate=1,
         kernel_initializer=KERNEL_INITIALIZER,
@@ -535,17 +619,27 @@ def get_multiinput_transformer(
         use_residual=model_config["CONV_TOWER_CONFIGS_FUSION"]["use_residual"],
         suppress_activation=True,
         pre_activation=True,
-        residual_connection_dropout_rate=model_config["RESIDUAL_CONNECTION_DROPOUT_RATE"] if model_config["SUPPRESS_DROPOUT"]==False else None,
+        residual_connection_dropout_rate=model_config[
+            "RESIDUAL_CONNECTION_DROPOUT_RATE"
+        ]
+        if model_config["SUPPRESS_DROPOUT"] == False
+        else None,
+        override_activation=model_config["OVERRIDE_ACTIVATION"]
     )
     atacseq_layer = get_conv_tower(
-        atacseq_layer,
+        atacseq_layer2,
         model_config["CONV_TOWER_CONFIGS_FUSION"]["atac"],
         model_config["DOWNSAMPLE_METHOD_CONV_TOWER"],
         base_name="ATAC_tower",
         use_residual=model_config["CONV_TOWER_CONFIGS_FUSION"]["use_residual"],
         suppress_activation=True,
         pre_activation=True,
-        residual_connection_dropout_rate=model_config["RESIDUAL_CONNECTION_DROPOUT_RATE"] if model_config["SUPPRESS_DROPOUT"]==False else None,
+        residual_connection_dropout_rate=model_config[
+            "RESIDUAL_CONNECTION_DROPOUT_RATE"
+        ]
+        if model_config["SUPPRESS_DROPOUT"] == False
+        else None,
+        override_activation=model_config["OVERRIDE_ACTIVATION"]
     )
 
     # genome_layer and atacseq_layer now should have shape (batch, seq_len, mha_embed_dim // 2)
@@ -598,16 +692,27 @@ def get_multiinput_transformer(
                 name=f"Transformer_block_{i}",
             )
             outputs = deepmind_transformer_block(layer)
-            logging.error(f"Length of transformer block output: {len(outputs)}")
+            # logging.error(f"Length of transformer block output: {len(outputs)}")
             layer = outputs[0]
 
     # Final postprocessing
 
     # use only sequence side
     _offset = layer.shape[1] // 2
-    layer = tf.keras.layers.Lambda(
-        lambda x: x[:, :_offset, :], name="Extract_sequence_region_INFO"
-    )(layer)
+    _channel = layer.shape[-1]
+
+    if model_config["FULL_TRANSFORMER_OUTPUT"] == False:
+        layer = tf.keras.layers.Lambda(
+            lambda x: x[:, :_offset, :], name="Extract_sequence_region_INFO"
+        )(layer)
+    else:
+        layer = tf.keras.layers.Conv1D(
+            filters=_channel,
+            kernel_size=2,
+            padding="valid",
+            dilation_rate=_offset,
+            name="combine_seq_and_signal",
+        )(layer)
 
     _prediction_head_config = {
         "activation": "relu",
@@ -627,35 +732,50 @@ def get_multiinput_transformer(
         suppress_activation=True,
         use_residual=False,
         pre_activation=True,
+        regularization=model_config["REGULARIZATION"],
+        l1=model_config["ELASTIC_L1"],
+        l2=model_config["ELASTIC_L2"],
+        override_activation=model_config["OVERRIDE_ACTIVATION"]
     )
 
     # Outputs
     layer_dilation_rate = dilation_rate[0]
-    if dense_b:
-        output_layer = get_layer(
-            inbound_layer=layer,
-            filters=output_filters,
-            kernel_size=output_kernel_size,
-            activation=input_activation,
-            padding=padding,
-            dilation_rate=layer_dilation_rate,
-            kernel_initializer=KERNEL_INITIALIZER,
-            skip_batch_norm=True,
-            n=1,
-        )
-    else:
-        output_layer = get_layer(
-            inbound_layer=layer,
-            filters=output_filters,
-            kernel_size=output_kernel_size,
-            activation=output_activation,
-            padding=padding,
-            dilation_rate=layer_dilation_rate,
-            kernel_initializer=KERNEL_INITIALIZER,
-            skip_batch_norm=True,
-            n=1,
-            focal_initializing=model_config["FOCAL_LOSS"]
-        )
+    # if dense_b:
+    #     output_layer = get_layer(
+    #         inbound_layer=layer,
+    #         filters=output_filters,
+    #         kernel_size=output_kernel_size,
+    #         activation=input_activation,
+    #         padding=padding,
+    #         dilation_rate=layer_dilation_rate,
+    #         kernel_initializer=KERNEL_INITIALIZER,
+    #         skip_batch_norm=True,
+    #         n=1,
+    #     )
+    # else:
+    #     output_layer = get_layer(
+    #         inbound_layer=layer,
+    #         filters=_prediction_head_config["num_filters"],
+    #         kernel_size=output_kernel_size,
+    #         activation='linear',
+    #         padding=padding,
+    #         dilation_rate=layer_dilation_rate,
+    #         kernel_initializer=KERNEL_INITIALIZER,
+    #         skip_batch_norm=True,
+    #         n=1,
+    #         focal_initializing=model_config["FOCAL_LOSS"],
+    #     ) # N, 256, 1
+
+    atacseq_layer1_compressed=tf.keras.layers.Conv1D(filters=32,kernel_size=4,strides=4, padding='valid')(atacseq_layer1) # N, 1024, 16
+    atacseq_layer1_compressed=SwiGlu(units=_prediction_head_config["num_filters"])(atacseq_layer1_compressed)
+    output_layer_weighted=tf.keras.layers.Multiply()([layer,atacseq_layer1_compressed])
+    output_layer=tf.keras.layers.Conv1D(filters=output_filters,
+                                        kernel_size=output_kernel_size,
+                                        activation=output_activation,
+                                        padding=padding,
+                                        dilation_rate=layer_dilation_rate,
+                                        kernel_initializer=KERNEL_INITIALIZER,
+                                        )(output_layer_weighted)
 
     # Downsampling from 1024 to 32 (change this) for a dynamic change
     seq_len = output_layer.shape[1]  # should be 256 now
@@ -680,7 +800,7 @@ def get_multiinput_transformer(
     logging.debug("Added outputs layer: " + "\n - " + str(output_layer))
 
     # Model
-    model = Model(inputs=[genome_input, atacseq_input], outputs=output_layer)
+    model = Model(inputs=[_input], outputs=output_layer)
 
     # lr schedule
     if model_config["COSINEDECAYRESTARTS"]:
@@ -691,6 +811,16 @@ def get_multiinput_transformer(
             t_mul=DEFAULT_COSINEDECAYRESTARTS_T_MUL,
             m_mul=DEFAULT_COSINEDECAYRESTARTS_M_MUL,
             alpha=DEFAULT_COSINEDECAYRESTARTS_ALPHA,
+        )
+    elif model_config["COSINEDECAY"]:
+        lr_schedule = tf.keras.optimizers.schedules.CosineDecay(
+            initial_learning_rate=model_config["INITIAL_LEARNING_RATE"],
+            decay_steps=model_config["COSINEDECAYDECAYSTEPS"],
+            alpha=model_config["COSINEDECAYALPHA"],
+            name=None,
+            warmup_target=model_config["INITIAL_LEARNING_RATE"]
+            * DEFAULT_COSINEDECAY_WARMUP_TARGET_MULTIPLIER,
+            warmup_steps=DEFAULT_COSINEDECAY_WARMUP_STEPS,
         )
     else:
         lr_schedule = (
@@ -756,11 +886,23 @@ def get_multiinput_transformer(
             # weight_decay=adam_decay,
         )
 
-    if model_config["FOCAL_LOSS"]==False:
+    if model_config["FOCAL_LOSS"] == False:
         model.compile(
             optimizer,
-            loss=loss_function,
-            metrics=[dice_coef],
+            loss=loss_function_class(
+                flanking_truncation_size=model_config["LOSS_FLANKING_TRUNCATION_SIZE"],
+            ),
+            weighted_metrics=[
+                MeanMetricWrapper(
+                    dice_coef_class(
+                        flanking_truncation_size=model_config[
+                            "LOSS_FLANKING_TRUNCATION_SIZE"
+                        ],
+                        unknown_coef= model_config['dice_unknown_coef']
+                    ),
+                    name="dice_coef",
+                )
+            ],
         )
     else:
         model.compile(
@@ -768,9 +910,20 @@ def get_multiinput_transformer(
             loss=loss_function_focal_class(
                 alpha=model_config["FOCAL_LOSS_ALPHA"],
                 gamma=model_config["FOCAL_LOSS_GAMMA"],
-                apply_class_balancing=model_config["FOCAL_LOSS_APPLY_ALPHA"]
+                apply_class_balancing=model_config["FOCAL_LOSS_APPLY_ALPHA"],
+                flanking_truncation_size=model_config["LOSS_FLANKING_TRUNCATION_SIZE"],
             ),
-            metrics=[dice_coef],
+            weighted_metrics=[
+                MeanMetricWrapper(
+                    dice_coef_class(
+                        flanking_truncation_size=model_config[
+                            "LOSS_FLANKING_TRUNCATION_SIZE"
+                        ],
+                        unknown_coef= model_config['dice_unknown_coef']
+                    ),
+                    name="dice_coef",
+                )
+            ],
         )
 
     logging.debug("Model compiled")

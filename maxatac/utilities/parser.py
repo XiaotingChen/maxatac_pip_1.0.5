@@ -804,6 +804,31 @@ def get_parser():
     )
 
     train_parser.add_argument(
+        "--COSINEDECAY",
+        dest="COSINEDECAY",
+        action="store_true",
+        default=False,
+        help="Whether enables COSINEDECAY scheduler during training.",
+    )
+    train_parser.add_argument(
+        "--COSINEDECAYALPHA",
+        dest="COSINEDECAYALPHA",
+        action="store",
+        type=float,
+        default=0.05,
+        help="Adjust COSINEDECAY scheduler's alpha value.",
+    )
+
+    train_parser.add_argument(
+        "--COSINEDECAYDECAYSTEPS",
+        dest="COSINEDECAYDECAYSTEPS",
+        action="store",
+        type=int,
+        default=10000,
+        help="Adjust COSINEDECAY scheduler's decay_steps value.",
+    )
+
+    train_parser.add_argument(
         "--USING_BASENJI_KERNEL",
         dest="USING_BASENJI_KERNEL",
         action="store_true",
@@ -928,6 +953,129 @@ def get_parser():
         action="store",
         default=0.05,
         help="Set RESIDUAL_CONNECTION_DROPOUT_RATE.",
+    )
+
+    train_parser.add_argument(
+        "--REGULARIZATION",
+        dest="REGULARIZATION",
+        action="store_true",
+        default=False,
+        help="Set REGULARIZATION.",
+    )
+
+    train_parser.add_argument(
+        "--ELASTIC_L1",
+        dest="ELASTIC_L1",
+        type=float,
+        action="store",
+        default=0.001,
+        help="Set ELASTIC_L1.",
+    )
+
+    train_parser.add_argument(
+        "--ELASTIC_L2",
+        dest="ELASTIC_L2",
+        type=float,
+        action="store",
+        default=0.001,
+        help="Set ELASTIC_L2.",
+    )
+
+    train_parser.add_argument(
+        "--chromosome_size_file",
+        dest="chromosome_size_file",
+        type=str,
+        help="The chromosome sizes file to reference",
+    )
+
+    train_parser.add_argument(
+        "--get_tfds",
+        dest="get_tfds",
+        action="store_true",
+        default=False,
+        help="Whether to only generate training tfds",
+    )
+
+    train_parser.add_argument(
+        "--tfds_meta",
+        dest="tfds_meta",
+        action="store",
+        help="Where to store tfds meta file",
+    )
+
+    train_parser.add_argument(
+        "--tfds_path",
+        dest="tfds_path",
+        action="store",
+        default="/data/weirauchlab/team/ches2d/MyTools/maxATAC_DATA",
+        help="Where to store tfds data",
+    )
+
+    train_parser.add_argument(
+        "--flanking_size",
+        dest="flanking_size",
+        action="store",
+        type=int,
+        default=512,
+        help="Flanking sequence size for shifting",
+    )
+
+    train_parser.add_argument(
+        "--LOSS_FLANKING_TRUNCATION_SIZE",
+        dest="LOSS_FLANKING_TRUNCATION_SIZE",
+        action="store",
+        type=int,
+        default=0,
+        help="Ouput flanking size to truncate in loss calculation",
+    )
+
+    train_parser.add_argument(
+        "--SHUFFLE_AUGMENTATION",
+        dest="SHUFFLE_AUGMENTATION",
+        action="store",
+        default='peak_centric',
+        choices=["random", "peak_centric", "no_map"],
+        help="Choose preprocessing map",
+    )
+
+    train_parser.add_argument(
+        "--FULL_TRANSFORMER_OUTPUT",
+        dest="FULL_TRANSFORMER_OUTPUT",
+        action="store_true",
+        default=False,
+        help="Whether to use full transformer output or only sequence side of information",
+    )
+
+    train_parser.add_argument(
+        "--OVERRIDE_ACTIVATION",
+        dest="OVERRIDE_ACTIVATION",
+        action="store",
+        default=None,
+        help="Specify activation to override default one",
+    )
+
+    train_parser.add_argument(
+        "--SUPPRESS_CELL_TYPE_SPECIFIC_TN_WEIGHTS",
+        dest="SUPPRESS_CELL_TYPE_SPECIFIC_TN_WEIGHTS",
+        action="store_true",
+        default=False,
+        help="Whether to suppress cell type specific TN sample weight",
+    )
+
+    train_parser.add_argument(
+        "--training_sample_upper_bound",
+        dest="training_sample_upper_bound",
+        type=int,
+        default=11_000_000,
+        help="Maximum number of data samples for training, override epochs option, set to 0 to disable.",
+    )
+
+    train_parser.add_argument(
+        "--dice_unknown_coef",
+        dest="dice_unknown_coef",
+        type=int,
+        default=10,
+        help="Set dice coef's unknown_coef parameter.",
     )
 
     #############################################

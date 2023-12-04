@@ -5,10 +5,10 @@ import py2bit
 import random
 
 from maxatac.utilities.system_tools import get_absolute_path
+from maxatac.utilities.constants import ALL_CHRS
 
-
-def build_chrom_sizes_dict(chromosome_list: list, 
-                           chrom_sizes_filename: str):
+def build_chrom_sizes_dict(chromosome_list: list = ALL_CHRS,
+                           chrom_sizes_filename: str = None):
     """Build a dictionary of chromosome sizes filtered for chromosomes in the input chromosome_list.
     
     The dictionary takes the form of: 
