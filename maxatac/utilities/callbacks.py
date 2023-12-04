@@ -33,6 +33,7 @@ def get_callbacks(
             write_images=tensor_board_write_images,
             write_graph=tensor_board_write_graph,
             update_freq="batch",
+            # profile_batch='32,42',
         ),
     ]
     if reduce_lr_on_plateau:
