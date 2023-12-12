@@ -9,18 +9,15 @@ import timeit
 import pandas as pd
 import tensorflow
 
-# from keras.utils.data_utils import OrderedEnqueuer
-from tensorflow.keras.utils import OrderedEnqueuer
-
 from maxatac.utilities.constants import (
     TRAIN_MONITOR,
     INPUT_LENGTH,
     INPUT_CHANNELS,
     OUTPUT_LENGTH,
     BP_RESOLUTION,
+    MODEL_CONFIG_UPDATE_LIST
 )
 from maxatac.utilities.system_tools import Mute
-from maxatac.utilities.phuc_utilities import generate_numpy_arrays
 
 with Mute():
     from tensorflow.keras.models import load_model
@@ -36,7 +33,9 @@ with Mute():
         CHIP_sample_weight_adjustment,
         ValidDataGen,
         DataGen,
-        dataset_mapping
+        dataset_mapping,
+        update_model_config_from_args,
+        generate_tfds_files
     )
     from maxatac.utilities.plot import (
         export_binary_metrics,
@@ -106,48 +105,7 @@ def run_training(args):
     with open(args.model_config, "r") as f:
         model_config = json.load(f)
 
-    # override model config from maxatac args
-    model_config["OPTIMIZER"] = args.optimizer
-
-    model_config["USING_BASENJI_KERNEL"] = args.USING_BASENJI_KERNEL
-    model_config["USING_ENFORMER_KERNEL"] = args.USING_ENFORMER_KERNEL
-    model_config["BASENJI_KERNEL_TRAINABLE"] = args.BASENJI_KERNEL_TRAINABLE
-    model_config["ENFORMER_KERNEL_TRAINABLE"] = args.ENFORMER_KERNEL_TRAINABLE
-    model_config["KERNEL_REPLACING"] = args.KERNEL_REPLACING
-
-    model_config["SUPPRESS_DROPOUT"] = args.SUPPRESS_DROPOUT
-    model_config[
-        "RESIDUAL_CONNECTION_DROPOUT_RATE"
-    ] = args.RESIDUAL_CONNECTION_DROPOUT_RATE
-    model_config["PREDICTION_HEAD_DROPOUT_RATE"] = args.PREDICTION_HEAD_DROPOUT_RATE
-
-    model_config["COSINEDECAYRESTARTS"] = args.COSINEDECAYRESTARTS
-    model_config[
-        "COSINEDECAYRESTARTS_FIRST_DECAY_STEPS"
-    ] = args.COSINEDECAYRESTARTS_FIRST_DECAY_STEPS
-
-    model_config["COSINEDECAY"] = args.COSINEDECAY
-    model_config["COSINEDECAYALPHA"] = args.COSINEDECAYALPHA
-    model_config["COSINEDECAYDECAYSTEPS"] = args.COSINEDECAYDECAYSTEPS
-
-    model_config["FOCAL_LOSS_ALPHA"] = args.FOCAL_LOSS_ALPHA
-    model_config["FOCAL_LOSS_GAMMA"] = args.FOCAL_LOSS_GAMMA
-    model_config["FOCAL_LOSS"] = args.FOCAL_LOSS
-    model_config["FOCAL_LOSS_APPLY_ALPHA"] = args.FOCAL_LOSS_APPLY_ALPHA
-
-    model_config["INITIAL_LEARNING_RATE"] = args.INITIAL_LEARNING_RATE
-    model_config["REGULARIZATION"] = args.REGULARIZATION
-    model_config["ELASTIC_L1"] = args.ELASTIC_L1
-    model_config["ELASTIC_L2"] = args.ELASTIC_L2
-
-    model_config["LOSS_FLANKING_TRUNCATION_SIZE"] = args.LOSS_FLANKING_TRUNCATION_SIZE
-
-    model_config["SHUFFLE_AUGMENTATION"] = args.SHUFFLE_AUGMENTATION
-
-    model_config["FULL_TRANSFORMER_OUTPUT"] = args.FULL_TRANSFORMER_OUTPUT
-    model_config["OVERRIDE_ACTIVATION"] = args.OVERRIDE_ACTIVATION
-    model_config["SUPPRESS_CELL_TYPE_SPECIFIC_TN_WEIGHTS"] = args.SUPPRESS_CELL_TYPE_SPECIFIC_TN_WEIGHTS
-    model_config['dice_unknown_coef']=args.dice_unknown_coef
+    model_config=update_model_config_from_args(model_config,args,MODEL_CONFIG_UPDATE_LIST)
 
     # Initialize the model with the architecture of choice
     maxatac_model = MaxATACModel(
@@ -170,8 +128,6 @@ def run_training(args):
     )
 
     logging.error("Import training regions")
-
-    # The args.train_roi and the args.validate_roi are the BED files that specify the regions of interest on the genome
 
     # Import training regions
     train_examples = ROIPool(
@@ -205,7 +161,7 @@ def run_training(args):
         )
         validation_steps_v2 = int(
             validate_examples.ROI_pool.shape[0] // args.batch_size
-        )  # under a fixed ratio of 5, we are probably just under-sample to 1/3 of the total background
+        )
 
         # override max epoch when training sample upper bound is available
         if args.training_sample_upper_bound != 0:
@@ -221,137 +177,10 @@ def run_training(args):
 
     logging.error("Initialize data generator")
 
-
+    # If tfds files need to be generated
     if args.get_tfds:
-        data_meta = pd.DataFrame(
-            columns=["train or valid", "tf", "cell_type", "roi_type", "path"]
-
-        )
-        chr_limit = build_chrom_sizes_dict(
-            chrom_sizes_filename=args.chromosome_size_file
-        )
-        tf = args.meta_file.split("/")[-1].split(".")[0].split("meta_file_")[1]
-
-
-        print("Getting valid samples")
-        # valid data, only with extended input size
-        data = tensorflow.data.Dataset.from_generator(
-            ValidDataGen(
-                sequence=args.sequence,
-                meta_table=maxatac_model.meta_dataframe,
-                roi_pool_atac=validate_examples.ROI_pool_ATAC,
-                roi_pool_chip=validate_examples.ROI_pool_CHIP,
-                cell_type_list=maxatac_model.cell_types,
-                atac_sampling_multiplier=args.ATAC_Sampling_Multiplier,
-                chip_sample_weight_baseline=args.CHIP_Sample_Weight_Baseline,
-                batch_size=args.batch_size,
-                shuffle=True,
-                chr_limit=chr_limit,
-                flanking_padding_size=args.flanking_size,
-                override_chip_shrinkage_factor=True,
-            ),
-            output_signature=(
-                tensorflow.TensorSpec(
-                    shape=(INPUT_LENGTH + 2 * args.flanking_size, INPUT_CHANNELS),
-                    dtype=tensorflow.float32,
-                ),
-                tensorflow.TensorSpec(
-                    shape=(OUTPUT_LENGTH + int(np.ceil(args.flanking_size*2/BP_RESOLUTION))), dtype=tensorflow.float32
-                ),
-                tensorflow.TensorSpec(shape=(), dtype=tensorflow.float32),
-            ),
-        )
-        data_path = "{}/{}/{}".format(args.tfds_path, "valid", tf)
-        data.save(
-            path=data_path,
-            compression="GZIP",
-        )
-        data_meta.loc[data_meta.shape[0]] = ["valid", tf, ".", ".", data_path]
-
-        print("Getting train samples")
-
-        # atac #
-        print("ATAC")
-        data = tensorflow.data.Dataset.from_generator(
-            DataGen(
-                sequence=args.sequence,
-                meta_table=maxatac_model.meta_dataframe,
-                roi_pool=train_examples.ROI_pool_ATAC,
-                chip=False,
-                cell_type=None,
-                atac_sampling_multiplier=args.ATAC_Sampling_Multiplier,
-                chip_sample_weight_baseline=args.CHIP_Sample_Weight_Baseline,
-                batch_size=args.batch_size,
-                shuffle=True,
-                chr_limit=chr_limit,
-                flanking_padding_size=args.flanking_size,
-            ),
-            output_signature=(
-                tensorflow.TensorSpec(
-                    shape=(INPUT_LENGTH + 2 * args.flanking_size, INPUT_CHANNELS),
-                    dtype=tensorflow.float32,
-                ),
-                tensorflow.TensorSpec(
-                    shape=(OUTPUT_LENGTH + int(np.ceil(args.flanking_size*2/BP_RESOLUTION))), dtype=tensorflow.float32
-                ),
-                tensorflow.TensorSpec(shape=(), dtype=tensorflow.float32),
-            ),
-        )
-        data_path = "{}/{}/{}_{}_{}".format(args.tfds_path, "train", tf, ".", "ATAC")
-        data.save(
-            path=data_path,
-            compression="GZIP",
-        )
-        data_meta.loc[data_meta.shape[0]] = ["train", tf, ".", "ATAC", data_path]
-
-        # training dataset, augmented by cell type shuffling, and extended input size
-        for cell_type in maxatac_model.cell_types:
-            # chip
-            print("CHIP", cell_type, sep="\t")
-            data = tensorflow.data.Dataset.from_generator(
-                DataGen(
-                    sequence=args.sequence,
-                    meta_table=maxatac_model.meta_dataframe,
-                    roi_pool=train_examples.ROI_pool_CHIP,
-                    chip=True,
-                    cell_type=cell_type,
-                    atac_sampling_multiplier=args.ATAC_Sampling_Multiplier,
-                    chip_sample_weight_baseline=args.CHIP_Sample_Weight_Baseline,
-                    batch_size=args.batch_size,
-                    shuffle=True,
-                    chr_limit=chr_limit,
-                    flanking_padding_size=args.flanking_size,
-                    override_shrinkage_factor=True,
-                    suppress_cell_type_TN_weight=model_config["SUPPRESS_CELL_TYPE_SPECIFIC_TN_WEIGHTS"],
-                ),
-                output_signature=(
-                    tensorflow.TensorSpec(
-                        shape=(INPUT_LENGTH + 2 * args.flanking_size, INPUT_CHANNELS),
-                        dtype=tensorflow.float32,
-                    ),
-                    tensorflow.TensorSpec(
-                        shape=(OUTPUT_LENGTH + int(np.ceil(args.flanking_size*2/BP_RESOLUTION))), dtype=tensorflow.float32
-                    ),
-                    tensorflow.TensorSpec(shape=(), dtype=tensorflow.float32),
-                ),
-            )
-            data_path = "{}/{}/{}_{}_{}".format(
-                args.tfds_path, "train", tf, cell_type, "CHIP"
-            )
-            data.save(
-                path=data_path,
-                compression="GZIP",
-            )
-            data_meta.loc[data_meta.shape[0]] = [
-                "train",
-                tf,
-                cell_type,
-                "CHIP",
-                data_path,
-            ]
-
-        data_meta.to_csv(args.tfds_meta, header=True, index=False, sep="\t")
-        logging.error("Generate tfds completed!")
+        generate_tfds_files(args, maxatac_model, train_examples, validate_examples, model_config)
+        logging.error("Generating tfds files completed!")
         sys.exit()
 
 
@@ -364,7 +193,6 @@ def run_training(args):
         logging.info("Max Queue Size found: " + str(queue_size))
 
     # get tfds train and valid object
-
     data_meta = pd.read_csv(args.tfds_meta, header=0, sep="\t")
 
     # train data
@@ -376,7 +204,6 @@ def run_training(args):
         atac_tfds_file,
         compression="GZIP",
     )
-
 
     # chip
     chip_tfds = []
@@ -399,14 +226,6 @@ def run_training(args):
     _chip_size = len(chip_tfds)
     _chip_prob = 1.0 / (1.0 + float(args.ATAC_Sampling_Multiplier))
     _atac_prob = 1.0 - _chip_prob
-
-    # hstack
-    # train_data_chip=tensorflow.data.Dataset.sample_from_datasets(
-    #     chip_tfds,
-    #     weights=[1.0/float(_chip_size)]*_chip_size,
-    #     stop_on_empty_dataset=False,
-    #     rerandomize_each_iteration=False
-    # )
 
     # vstack
     train_data_chip = chip_tfds[0]
@@ -529,8 +348,6 @@ def run_training(args):
         training_history=training_history, output_dir=maxatac_model.output_directory
     )
 
-    # If plot then plot the model structure and training metrics
-    # If model is transformer then also plot all the attention weights and final positional encoding
     if args.plot:
         tf = maxatac_model.train_tf
         TCL = "_".join(maxatac_model.cell_types)
@@ -540,14 +357,6 @@ def run_training(args):
         export_binary_metrics(
             training_history, tf, RR, ARC, maxatac_model.results_location, best_epoch
         )
-        # export_model_structure(maxatac_model.nn_model, maxatac_model.results_location)
-
-        # data_sample = tensorflow.expand_dims(input_batch[0], axis=0)
-        # if not(USE_RPE):
-        #    mha_names = [f"Encoder_{i}_softmax_att_weights" for i in range(NUM_MHA)]
-        # else:
-        #    mha_names = [f"Transformer_block_{i}" for i in range(NUM_MHA)]
-        # plot_attention_weights(maxatac_model.nn_model, mha_names, data_sample, num_heads=NUM_HEADS, file_location=args.output)
 
     logging.error("Results are saved to: " + maxatac_model.results_location)
 

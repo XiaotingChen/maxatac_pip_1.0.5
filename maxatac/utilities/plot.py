@@ -11,7 +11,6 @@ import tensorflow as tf
 
 with Mute():
     from tensorflow.keras.utils import plot_model
-    from maxatac.utilities.transformer_interpret_tools import one_hot_to_tokens
 
 
 

@@ -1,6 +1,7 @@
 import random
 import sys
 from os import path
+import logging
 
 import tensorflow as tf
 import numpy as np
@@ -15,14 +16,9 @@ import ntpath
 import shutil
 import copy
 from maxatac.utilities import constants
-from maxatac.architectures.dcnn import get_dilated_cnn, get_dilated_cnn_with_attention
-from maxatac.architectures.transformers import get_transformer
-
-
+from maxatac.architectures.dcnn import get_dilated_cnn
 from maxatac.architectures.multiinput_transformers import get_multiinput_transformer
-from maxatac.architectures.multiinput_crossatt_transformers import (
-    get_multiinput_crossatt_transformer,
-)
+
 
 from maxatac.utilities.constants import (
     BP_RESOLUTION,
@@ -154,17 +150,7 @@ class MaxATACModel(object):
                 weights=self.weights,
                 model_config=self.model_config,
             )
-
-
-        elif self.arch == "DCNN_V2_attention":
-            return get_dilated_cnn_with_attention(
-                output_activation=self.output_activation,
-                target_scale_factor=self.target_scale_factor,
-                dense_b=self.dense,
-                weights=self.weights,
-            )
-
-        elif self.arch == "Transformer_phuc":
+        elif self.arch == "Transformer":
             if self.inter_fusion:
                 return get_multiinput_transformer(
                     output_activation=self.output_activation,
@@ -174,22 +160,7 @@ class MaxATACModel(object):
                     model_config=self.model_config,
                 )
             else:
-                return get_transformer(
-                    output_activation=self.output_activation,
-                    target_scale_factor=self.target_scale_factor,
-                    dense_b=self.dense,
-                    weights=self.weights,
-                    model_config=self.model_config,
-                )
-
-        elif self.arch == "Crossatt_transformer":
-            assert self.inter_fusion, "This architecture only works with split inputs!"
-            return get_multiinput_crossatt_transformer(
-                output_activation=self.output_activation,
-                weights=self.weights,
-                model_config=self.model_config,
-            )
-
+                sys.exit("Model Architecture not specified correctly. Please check")
         else:
             sys.exit("Model Architecture not specified correctly. Please check")
 
@@ -1803,17 +1774,11 @@ def CHIP_sample_weight_adjustment(CHIP_roi_df):
         ["Chr", "Start", "Stop", "ROI_Type", "Cell_Line", "Weight shrinkage factor"]
     ]
 
+def update_model_config_from_args(model_config,args,keys):
+    for key in keys:
+        model_config[key]=getattr(args.key)
 
-
-# def peak_centric_map(x, y, w):
-#     return x[512:-512, :], y[16:-16], w
-#
-#
-# def random_shuffling_map(x, y, w):
-#     shift = np.random.randint(low=0, high=INPUT_LENGTH)
-#     y_shift = int(np.floor(shift / 32))
-#     return x[shift : shift + INPUT_LENGTH, :], y[y_shift : y_shift + OUTPUT_LENGTH], w
-
+    return model_config
 
 def peak_centric_map_tf(x, y, w):
     shift = tf.constant(512, dtype=tf.int32)
@@ -1826,7 +1791,6 @@ def peak_centric_map_tf(x, y, w):
         tf.slice(y, begin=[y_shift], size=[OUTPUT_LENGTH]),
         w,
     )
-
 
 def random_shuffling_map_tf(x, y, w):
     shift = tf.random.uniform([1], minval=0, maxval=INPUT_LENGTH, dtype=tf.int32)[0]
@@ -1848,3 +1812,157 @@ dataset_mapping = {
     'peak_centric': peak_centric_map_tf,
     'no_map':no_mapping_tf
 }
+
+def generate_tfds_files(
+    args, maxatac_model, train_examples, validate_examples, model_config
+):
+    data_meta = pd.DataFrame(
+        columns=["train or valid", "tf", "cell_type", "roi_type", "path"]
+    )
+    chr_limit = build_chrom_sizes_dict(chrom_sizes_filename=args.chromosome_size_file)
+    transcription_factor = (
+        args.meta_file.split("/")[-1].split(".")[0].split("meta_file_")[1]
+    )
+
+    logging.error("Getting valid samples")
+    data = tf.data.Dataset.from_generator(
+        ValidDataGen(
+            sequence=args.sequence,
+            meta_table=maxatac_model.meta_dataframe,
+            roi_pool_atac=validate_examples.ROI_pool_ATAC,
+            roi_pool_chip=validate_examples.ROI_pool_CHIP,
+            cell_type_list=maxatac_model.cell_types,
+            atac_sampling_multiplier=args.ATAC_Sampling_Multiplier,
+            chip_sample_weight_baseline=args.CHIP_Sample_Weight_Baseline,
+            batch_size=args.batch_size,
+            shuffle=True,
+            chr_limit=chr_limit,
+            flanking_padding_size=args.flanking_size,
+            override_chip_shrinkage_factor=True,
+        ),
+        output_signature=(
+            tf.TensorSpec(
+                shape=(INPUT_LENGTH + 2 * args.flanking_size, INPUT_CHANNELS),
+                dtype=tf.float32,
+            ),
+            tf.TensorSpec(
+                shape=(
+                    OUTPUT_LENGTH + int(np.ceil(args.flanking_size * 2 / BP_RESOLUTION))
+                ),
+                dtype=tf.float32,
+            ),
+            tf.TensorSpec(shape=(), dtype=tf.float32),
+        ),
+    )
+    data_path = "{}/{}/{}".format(args.tfds_path, "valid", transcription_factor)
+    data.save(
+        path=data_path,
+        compression="GZIP",
+    )
+    data_meta.loc[data_meta.shape[0]] = [
+        "valid",
+        transcription_factor,
+        ".",
+        ".",
+        data_path,
+    ]
+
+    logging.error("Getting train samples")
+    # atac #
+    logging.error("ATAC")
+    data = tf.data.Dataset.from_generator(
+        DataGen(
+            sequence=args.sequence,
+            meta_table=maxatac_model.meta_dataframe,
+            roi_pool=train_examples.ROI_pool_ATAC,
+            chip=False,
+            cell_type=None,
+            atac_sampling_multiplier=args.ATAC_Sampling_Multiplier,
+            chip_sample_weight_baseline=args.CHIP_Sample_Weight_Baseline,
+            batch_size=args.batch_size,
+            shuffle=True,
+            chr_limit=chr_limit,
+            flanking_padding_size=args.flanking_size,
+        ),
+        output_signature=(
+            tf.TensorSpec(
+                shape=(INPUT_LENGTH + 2 * args.flanking_size, INPUT_CHANNELS),
+                dtype=tf.float32,
+            ),
+            tf.TensorSpec(
+                shape=(
+                    OUTPUT_LENGTH + int(np.ceil(args.flanking_size * 2 / BP_RESOLUTION))
+                ),
+                dtype=tf.float32,
+            ),
+            tf.TensorSpec(shape=(), dtype=tf.float32),
+        ),
+    )
+    data_path = "{}/{}/{}_{}_{}".format(
+        args.tfds_path, "train", transcription_factor, ".", "ATAC"
+    )
+    data.save(
+        path=data_path,
+        compression="GZIP",
+    )
+    data_meta.loc[data_meta.shape[0]] = [
+        "train",
+        transcription_factor,
+        ".",
+        "ATAC",
+        data_path,
+    ]
+
+    # training dataset, augmented by cell type shuffling, and extended input size
+    for cell_type in maxatac_model.cell_types:
+        # chip
+        logging.error("CHIP " + cell_type)
+        data = tf.data.Dataset.from_generator(
+            DataGen(
+                sequence=args.sequence,
+                meta_table=maxatac_model.meta_dataframe,
+                roi_pool=train_examples.ROI_pool_CHIP,
+                chip=True,
+                cell_type=cell_type,
+                atac_sampling_multiplier=args.ATAC_Sampling_Multiplier,
+                chip_sample_weight_baseline=args.CHIP_Sample_Weight_Baseline,
+                batch_size=args.batch_size,
+                shuffle=True,
+                chr_limit=chr_limit,
+                flanking_padding_size=args.flanking_size,
+                override_shrinkage_factor=True,
+                suppress_cell_type_TN_weight=model_config[
+                    "SUPPRESS_CELL_TYPE_SPECIFIC_TN_WEIGHTS"
+                ],
+            ),
+            output_signature=(
+                tf.TensorSpec(
+                    shape=(INPUT_LENGTH + 2 * args.flanking_size, INPUT_CHANNELS),
+                    dtype=tf.float32,
+                ),
+                tf.TensorSpec(
+                    shape=(
+                        OUTPUT_LENGTH
+                        + int(np.ceil(args.flanking_size * 2 / BP_RESOLUTION))
+                    ),
+                    dtype=tf.float32,
+                ),
+                tf.TensorSpec(shape=(), dtype=tf.float32),
+            ),
+        )
+        data_path = "{}/{}/{}_{}_{}".format(
+            args.tfds_path, "train", transcription_factor, cell_type, "CHIP"
+        )
+        data.save(
+            path=data_path,
+            compression="GZIP",
+        )
+        data_meta.loc[data_meta.shape[0]] = [
+            "train",
+            transcription_factor,
+            cell_type,
+            "CHIP",
+            data_path,
+        ]
+
+    data_meta.to_csv(args.tfds_meta, header=True, index=False, sep="\t")
