@@ -119,6 +119,18 @@ def minmax_normalize_array(array: np.array, min_value: int, max_value: int, clip
 
     return normalized_array
 
+def median_mad_normalize_array(array, median, mad):
+    """
+    Median-mad normalize the numpy array based on the genomic median and median absolute deviation
+
+    :param mad:
+    :param median:
+    :param array: Input array of bigwig values
+
+    :return: Median-mad normalized array
+    """
+    return (array - median) / mad
+
 
 def zscore_normalize_array(array, mean, std_dev):
     """

@@ -6,6 +6,7 @@ import os
 import glob
 import timeit
 import pandas as pd
+import json
 import multiprocessing
 import pybedtools
 from multiprocessing import Pool, Manager
@@ -15,7 +16,9 @@ with Mute():
     from maxatac.utilities.genome_tools import build_chrom_sizes_dict
     from maxatac.utilities.peak_tools import get_threshold
     from maxatac.utilities.prediction_tools import write_predictions_to_bigwig, \
-        create_prediction_regions, make_stranded_predictions
+        import_prediction_regions, create_prediction_regions, make_stranded_predictions
+    from maxatac.utilities.constants import DATA_PATH
+    from maxatac.analyses.peaks import run_call_peaks
 
 
 def run_prediction(args):
@@ -65,8 +68,16 @@ def run_prediction(args):
         args.chromosomes = all_chr
 
     # Create the output directory set by the parser
-    logging.debug(f"Make output directory: {args.output_directory}")
+	logging.info(f"Make output directory: {args.output_directory}")
     output_directory = get_dir(args.output_directory)
+
+    # Open the training args JSON file
+    with open(args.train_json, "r") as f:
+        train_args = json.load(f)
+
+    # Open the model_config JSON file
+    with open(args.model_config, "r") as f:
+        model_config = json.load(f)
 
     # Output filename for the bigwig predictions file based on the output directory and the prefix. Add the bw extension
     outfile_name_bigwig = os.path.join(output_directory, args.name + ".bw")
@@ -74,17 +85,17 @@ def run_prediction(args):
     # The function build_chrom_sizes_dict is used to make sure regions fall within chromosome bounds.
     # Create a dictionary of chromosome sizes used to make the bigwig files
     chrom_sizes_dict = build_chrom_sizes_dict(args.chromosomes, args.chrom_sizes)
-    logging.debug(f"Chromosome size dictionary: {chrom_sizes_dict}")
+
 
     # Import the regions for prediction.
     logging.info("Create prediction regions")
     regions_pool = create_prediction_regions(chromosomes=args.chromosomes,
-                                             chrom_sizes=args.chrom_sizes,
-                                             blacklist=args.blacklist,
-                                             step_size=args.step_size,
-                                             peaks=args.roi,
-                                             windows=args.windows
-                                             )
+                                                 chrom_sizes=args.chrom_sizes,
+                                                 blacklist=args.blacklist,
+                                                 step_size=args.step_size,
+												 peaks=args.roi,
+                                                 windows=args.windows
+                                                 )
 
     # Find the chromosomes for which we can make predictions based on the requested chroms
     # and the BED regions provided in the ROI file
@@ -98,7 +109,7 @@ def run_prediction(args):
                  "Chromosome requested: \n   - " + "\n    -".join(args.chromosomes) + "\n" +
                  "Chromosomes in final prediction set: \n   - " + "\n    -".join(chrom_list) + "\n" +
                  f"Output directory: {output_directory} \n" +
-                 f"Batch Size: {args.batch_size} \n" +
+				 f"Batch Size: {args.batch_size} \n" +
                  f"Output filename: {outfile_name_bigwig}"
                  )
 
@@ -116,6 +127,7 @@ def run_prediction(args):
     prediction_bedgraph = pd.concat(forward_strand_predictions)
 
     logging.info("Write predictions to a bigwig file")
+
     write_predictions_to_bigwig(prediction_bedgraph,
                                 output_filename=outfile_name_bigwig,
                                 chrom_sizes_dictionary=chrom_sizes_dict,
@@ -127,6 +139,7 @@ def run_prediction(args):
         args.input_bigwig = outfile_name_bigwig
 
         peaks_filename = os.path.join(output_directory, args.name + "_peaks.bed")
+
 
         thresh = get_threshold(cutoff_file=args.cutoff_file,
                                cutoff_type=args.cutoff_type,

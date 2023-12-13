@@ -4,12 +4,13 @@ import os
 from os import getcwd
 from yaml import dump
 
-from maxatac.utilities.system_tools import (get_version,
-                                            get_absolute_path,
-                                            get_cpu_count,
-                                            Mute,
-                                            update_reference_genome_paths
-                                            )
+from maxatac.utilities.system_tools import (
+    get_version,
+    get_absolute_path,
+    get_cpu_count,
+    Mute,
+    update_reference_genome_paths
+)
 
 with Mute():
     from maxatac.analyses.average import run_averaging
@@ -23,23 +24,25 @@ with Mute():
     from maxatac.analyses.threshold import run_thresholding
     from maxatac.analyses.data import run_data
 
-from maxatac.utilities.constants import (DEFAULT_TRAIN_VALIDATE_CHRS,
-                                         LOG_LEVELS,
-                                         DEFAULT_LOG_LEVEL,
-                                         DEFAULT_TRAIN_EPOCHS,
-                                         DEFAULT_TRAIN_BATCHES_PER_EPOCH,
-                                         BATCH_SIZE,
-                                         VAL_BATCH_SIZE,
-                                         INPUT_LENGTH,
-                                         DEFAULT_TRAIN_CHRS,
-                                         DEFAULT_VALIDATE_CHRS,
-                                         DEFAULT_ROUND,
-                                         DEFAULT_TEST_CHRS,
-                                         DEFAULT_BENCHMARKING_AGGREGATION_FUNCTION,
-                                         DEFAULT_BENCHMARKING_BIN_SIZE,
-                                         ALL_CHRS,
-                                         AUTOSOMAL_CHRS
-                                         )
+from maxatac.utilities.constants import (
+    DEFAULT_TRAIN_VALIDATE_CHRS,
+    LOG_LEVELS,
+    DEFAULT_LOG_LEVEL,
+    DEFAULT_TRAIN_EPOCHS,
+    DEFAULT_TRAIN_BATCHES_PER_EPOCH,
+    BATCH_SIZE,
+    VAL_BATCH_SIZE,
+    INPUT_LENGTH,
+    DEFAULT_TRAIN_CHRS,
+    DEFAULT_VALIDATE_CHRS,
+    DEFAULT_ROUND,
+    DEFAULT_TEST_CHRS,
+    DEFAULT_BENCHMARKING_AGGREGATION_FUNCTION,
+    DEFAULT_BENCHMARKING_BIN_SIZE,
+    ALL_CHRS,
+    AUTOSOMAL_CHRS,
+    REFERENCE_SEQUENCE_TWOBIT,
+)
 
 
 def normalize_args(args, skip_list=[], cwd_abs_path=None):
@@ -66,11 +69,11 @@ def normalize_args(args, skip_list=[], cwd_abs_path=None):
 
 def get_parser():
     """Build parsers with user input.
-    
+
     There are currently parsers for the following subcommands:
     average, train, predict, normalize, data, variants, benchmark,
     threshold, peaks, prepare
-    
+
     Returns:
         argparse object
     """
@@ -100,6 +103,7 @@ def get_parser():
     #############################################
     # Data subparser
     #############################################
+    # Add a subparser for the data function
     data_parser = subparsers.add_parser("data",
                                         parents=[parent_parser],
                                         help="Download and install reference data."
@@ -137,7 +141,6 @@ def get_parser():
     #############################################
     # Average subparser
     #############################################
-    # Add a subparser for the average function
     average_parser = subparsers.add_parser("average",
                                            parents=[parent_parser],
                                            help="Average bigwig files together."
@@ -161,6 +164,8 @@ def get_parser():
                                 required=True,
                                 help="Output filename base. The extension .bw will be added to the name."
                                 )
+
+
     # Add optional arguments to the parser
     average_parser.add_argument("-cs", "--chrom_sizes", "--chromosome_sizes",
                                 dest="chromosome_sizes",
@@ -194,6 +199,7 @@ def get_parser():
     #############################################
     # Predict subparser
     #############################################
+    # Add a subparser for the predict function
     predict_parser = subparsers.add_parser("predict",
                                            parents=[parent_parser],
                                            help="Predict transcription factor binding.",
@@ -223,6 +229,22 @@ def get_parser():
                                 help="Genome sequence 2bit file."
                                 )
 
+    predict_parser.add_argument(
+        "--train_json",
+        dest="train_json",
+        type=str,
+        required=True,
+        help="The JSON file that contains user-defined arguments for training",
+    )
+
+    predict_parser.add_argument(
+        "--model_config",
+        dest="model_config",
+        type=str,
+        required=True,
+        help="The JSON file that contains specifications of the model architecture",
+    )
+
     predict_parser.add_argument("-i", "-s", "--signal",
                                 dest="signal",
                                 type=str,
@@ -248,14 +270,14 @@ def get_parser():
                                 default=False,
                                 required=False,
                                 help="Bed file with ranges for input sequences to be used in prediction. \
-                                      Default: None, predictions are done on the whole chromosome."
+                                          Default: None, predictions are done on the whole chromosome."
                                 )
 
     predict_parser.add_argument("--windows", "-w",
                                 dest="windows",
                                 required=False,
                                 help="Bed file with ranges to use for windows. These windows must 1,024 bp wide and \
-                                    generated with an uniform step size. These will replace windows generated de novo."
+                                        generated with an uniform step size. These will replace windows generated de novo."
                                 )
 
     predict_parser.add_argument("--loglevel",
@@ -285,7 +307,7 @@ def get_parser():
                                 required=True,
                                 type=str,
                                 help="Sting to use for filename. This should not include extensions. \
-                                      Example: GM12878_CTCF"
+                                          Example: GM12878_CTCF"
                                 )
 
     predict_parser.add_argument("-cs", "-chrom_sizes", "--chrom_sizes", "--chromosome_sizes",
@@ -300,8 +322,17 @@ def get_parser():
                                 nargs="+",
                                 default=AUTOSOMAL_CHRS,
                                 help="Chromosomes from --chromosomes fixed for prediction. \
-                                      Default: All chromosomes chr1-22"
+                                          Default: All chromosomes chr1-22"
                                 )
+
+    predict_parser.add_argument(
+        "-bin",
+        "--bin_size",
+        dest="BIN_SIZE",
+        type=int,
+        default=DEFAULT_BENCHMARKING_BIN_SIZE,
+        help="Bin size to use for peak calling",
+    )
 
     predict_parser.add_argument("-ct", "-cutoff_type", "--cutoff_type",
                                 dest="cutoff_type",
@@ -333,11 +364,11 @@ def get_parser():
     #############################################
     # Train parser
     #############################################
+    # Add a subparser for the train function
     train_parser = subparsers.add_parser("train",
                                          parents=[parent_parser],
                                          help="Train a maxATAC model."
                                          )
-
     # Set the default function
     train_parser.set_defaults(func=run_training)
 
@@ -562,6 +593,307 @@ def get_parser():
                               help="Chromosome sizes file"
                               )
 
+    train_parser.add_argument(
+        "--optimizer",
+        dest="optimizer",
+        default="Adam",
+        choices=["Adam", "AdamW", "Lion"],
+        help="Optimizer to use in training.",
+    )
+
+    train_parser.add_argument(
+        "--reduce_lr_on_plateau",
+        dest="reduce_lr_on_plateau",
+        action="store_true",
+        default=False,
+        help="Whether enables reduce_lr_on_plateau during training.",
+    )
+
+    train_parser.add_argument(
+        "--COSINEDECAYRESTARTS",
+        dest="COSINEDECAYRESTARTS",
+        action="store_true",
+        default=False,
+        help="Whether enables COSINEDECAYRESTARTS scheduler during training.",
+    )
+
+    train_parser.add_argument(
+        "--COSINEDECAYRESTARTS_FIRST_DECAY_STEPS",
+        dest="COSINEDECAYRESTARTS_FIRST_DECAY_STEPS",
+        type=int,
+        action="store",
+        default=1000,
+        help="Adjust parameter COSINEDECAYRESTARTS_FIRST_DECAY_STEPS.",
+    )
+
+    train_parser.add_argument(
+        "--COSINEDECAY",
+        dest="COSINEDECAY",
+        action="store_true",
+        default=False,
+        help="Whether enables COSINEDECAY scheduler during training.",
+    )
+    train_parser.add_argument(
+        "--COSINEDECAYALPHA",
+        dest="COSINEDECAYALPHA",
+        action="store",
+        type=float,
+        default=0.05,
+        help="Adjust COSINEDECAY scheduler's alpha value.",
+    )
+
+    train_parser.add_argument(
+        "--COSINEDECAYDECAYSTEPS",
+        dest="COSINEDECAYDECAYSTEPS",
+        action="store",
+        type=int,
+        default=10000,
+        help="Adjust COSINEDECAY scheduler's decay_steps value.",
+    )
+
+    train_parser.add_argument(
+        "--USING_BASENJI_KERNEL",
+        dest="USING_BASENJI_KERNEL",
+        action="store_true",
+        default=False,
+        help="Whether to use BASENJI kernel in the 1st layer.",
+    )
+
+    train_parser.add_argument(
+        "--USING_ENFORMER_KERNEL",
+        dest="USING_ENFORMER_KERNEL",
+        action="store_true",
+        default=False,
+        help="Whether to use ENFORMER kernel in the 1st layer.",
+    )
+
+    train_parser.add_argument(
+        "--BASENJI_KERNEL_TRAINABLE",
+        dest="BASENJI_KERNEL_TRAINABLE",
+        action="store_true",
+        default=False,
+        help="Whether enables BASENJI kernel to learn.",
+    )
+
+    train_parser.add_argument(
+        "--ENFORMER_KERNEL_TRAINABLE",
+        dest="ENFORMER_KERNEL_TRAINABLE",
+        action="store_true",
+        default=False,
+        help="Whether enables ENFORMER kernel to learn.",
+    )
+
+    train_parser.add_argument(
+        "--KERNEL_REPLACING",
+        dest="KERNEL_REPLACING",
+        action="store_true",
+        default=False,
+        help="Whether replaces the original kernel or work as an non-trainable side branch.",
+    )
+
+    train_parser.add_argument(
+        "--SUPPRESS_DROPOUT",
+        dest="SUPPRESS_DROPOUT",
+        default=False,
+        action="store_true",
+        help="Whether to suppress dropout in non-transformer layers.",
+    )
+
+    train_parser.add_argument(
+        "--FOCAL_LOSS",
+        dest="FOCAL_LOSS",
+        default=False,
+        action="store_true",
+        help="Whether to use binary focal cross entropy as loss function.",
+    )
+
+    train_parser.add_argument(
+        "--FOCAL_LOSS_ALPHA",
+        dest="FOCAL_LOSS_ALPHA",
+        type=float,
+        default=0.25,
+        action="store",
+        help="Set alpha value in binary focal cross entropy as loss function.",
+    )
+
+    train_parser.add_argument(
+        "--FOCAL_LOSS_GAMMA",
+        dest="FOCAL_LOSS_GAMMA",
+        type=float,
+        default=2,
+        action="store",
+        help="Set gamma value in binary focal cross entropy as loss function.",
+    )
+
+    train_parser.add_argument(
+        "--FOCAL_LOSS_APPLY_ALPHA",
+        dest="FOCAL_LOSS_APPLY_ALPHA",
+        default=False,
+        action="store_true",
+        help="Whether to use alpha in binary focal cross entropy as loss function.",
+    )
+
+    train_parser.add_argument(
+        "--ATAC_Sampling_Multiplier",
+        dest="ATAC_Sampling_Multiplier",
+        type=int,
+        action="store",
+        default=0,
+        help="This sets the number of ATAC samples matched to each ChIP sample during training, disable by setting to 0.",
+    )
+
+    train_parser.add_argument(
+        "--CHIP_Sample_Weight_Baseline",
+        dest="CHIP_Sample_Weight_Baseline",
+        type=int,
+        action="store",
+        default=5,
+        help="This sets the baseline sample weight for ChIP-seq peaks.",
+    )
+
+    train_parser.add_argument(
+        "--INITIAL_LEARNING_RATE",
+        dest="INITIAL_LEARNING_RATE",
+        type=float,
+        action="store",
+        default=1e-3,
+        help="Set INITIAL_LEARNING_RATE.",
+    )
+
+    train_parser.add_argument(
+        "--PREDICTION_HEAD_DROPOUT_RATE",
+        dest="PREDICTION_HEAD_DROPOUT_RATE",
+        type=float,
+        action="store",
+        default=0.05,
+        help="Set PREDICTION_HEAD_DROPOUT_RATE.",
+    )
+
+    train_parser.add_argument(
+        "--RESIDUAL_CONNECTION_DROPOUT_RATE",
+        dest="RESIDUAL_CONNECTION_DROPOUT_RATE",
+        type=float,
+        action="store",
+        default=0.05,
+        help="Set RESIDUAL_CONNECTION_DROPOUT_RATE.",
+    )
+
+    train_parser.add_argument(
+        "--REGULARIZATION",
+        dest="REGULARIZATION",
+        action="store_true",
+        default=False,
+        help="Set REGULARIZATION.",
+    )
+
+    train_parser.add_argument(
+        "--ELASTIC_L1",
+        dest="ELASTIC_L1",
+        type=float,
+        action="store",
+        default=0.001,
+        help="Set ELASTIC_L1.",
+    )
+
+    train_parser.add_argument(
+        "--ELASTIC_L2",
+        dest="ELASTIC_L2",
+        type=float,
+        action="store",
+        default=0.001,
+        help="Set ELASTIC_L2.",
+    )
+
+    train_parser.add_argument(
+        "--get_tfds",
+        dest="get_tfds",
+        action="store_true",
+        default=False,
+        help="Whether to only generate training tfds",
+    )
+
+    train_parser.add_argument(
+        "--tfds_meta",
+        dest="tfds_meta",
+        action="store",
+        help="Where to store tfds meta file",
+    )
+
+    train_parser.add_argument(
+        "--tfds_path",
+        dest="tfds_path",
+        action="store",
+        default="/data/weirauchlab/team/ches2d/MyTools/maxATAC_DATA",
+        help="Where to store tfds data",
+    )
+
+    train_parser.add_argument(
+        "--flanking_size",
+        dest="flanking_size",
+        action="store",
+        type=int,
+        default=512,
+        help="Flanking sequence size for shifting",
+    )
+
+    train_parser.add_argument(
+        "--LOSS_FLANKING_TRUNCATION_SIZE",
+        dest="LOSS_FLANKING_TRUNCATION_SIZE",
+        action="store",
+        type=int,
+        default=0,
+        help="Ouput flanking size to truncate in loss calculation",
+    )
+
+    train_parser.add_argument(
+        "--SHUFFLE_AUGMENTATION",
+        dest="SHUFFLE_AUGMENTATION",
+        action="store",
+        default='peak_centric',
+        choices=["random", "peak_centric", "no_map"],
+        help="Choose preprocessing map",
+    )
+
+    train_parser.add_argument(
+        "--FULL_TRANSFORMER_OUTPUT",
+        dest="FULL_TRANSFORMER_OUTPUT",
+        action="store_true",
+        default=False,
+        help="Whether to use full transformer output or only sequence side of information",
+    )
+
+    train_parser.add_argument(
+        "--OVERRIDE_ACTIVATION",
+        dest="OVERRIDE_ACTIVATION",
+        action="store",
+        default=None,
+        help="Specify activation to override default one",
+    )
+
+    train_parser.add_argument(
+        "--SUPPRESS_CELL_TYPE_SPECIFIC_TN_WEIGHTS",
+        dest="SUPPRESS_CELL_TYPE_SPECIFIC_TN_WEIGHTS",
+        action="store_true",
+        default=False,
+        help="Whether to suppress cell type specific TN sample weight",
+    )
+
+    train_parser.add_argument(
+        "--training_sample_upper_bound",
+        dest="training_sample_upper_bound",
+        type=int,
+        default=11_000_000,
+        help="Maximum number of data samples for training, override epochs option, set to 0 to disable.",
+    )
+
+    train_parser.add_argument(
+        "--dice_unknown_coef",
+        dest="dice_unknown_coef",
+        type=int,
+        default=10,
+        help="Set dice coef's unknown_coef parameter.",
+    )
+
     #############################################
     # Normalize parser
     #############################################
@@ -665,6 +997,7 @@ def get_parser():
     #############################################
     # Benchmark subparser
     #############################################
+    # Add a subparser for the benchmark function
     benchmark_parser = subparsers.add_parser("benchmark",
                                              parents=[parent_parser],
                                              help="Benchmark predictions against a gold standard."
@@ -673,7 +1006,6 @@ def get_parser():
     # Set the default function
     benchmark_parser.set_defaults(func=run_benchmarking)
 
-    # Add arguments to the parser
     # Add arguments to the parser
     benchmark_prediction_filetype = benchmark_parser.add_mutually_exclusive_group(required=True)
 
@@ -702,8 +1034,8 @@ def get_parser():
                                   nargs="+",
                                   default=DEFAULT_TEST_CHRS,
                                   help="Chromosomes list for analysis. \
-                                        Optionally with regions in a form of chrN:start-end. \
-                                        Default: main human chromosomes, whole length"
+                                            Optionally with regions in a form of chrN:start-end. \
+                                            Default: main human chromosomes, whole length"
                                   )
 
     benchmark_parser.add_argument("--bin_size",
@@ -711,7 +1043,7 @@ def get_parser():
                                   type=int,
                                   default=DEFAULT_BENCHMARKING_BIN_SIZE,
                                   help="Bin size to split prediction and control data before running prediction. \
-                                        Default: " + str(DEFAULT_BENCHMARKING_BIN_SIZE)
+                                            Default: " + str(DEFAULT_BENCHMARKING_BIN_SIZE)
                                   )
 
     benchmark_parser.add_argument("--agg",
@@ -719,7 +1051,7 @@ def get_parser():
                                   type=str,
                                   default=DEFAULT_BENCHMARKING_AGGREGATION_FUNCTION,
                                   help="Aggregation function to use for combining results into bins: \
-                                        max, mean, min"
+                                            max, mean, min"
                                   )
 
     benchmark_parser.add_argument("--round_predictions",
@@ -758,15 +1090,16 @@ def get_parser():
                                   )
 
     benchmark_parser.add_argument("-skip_plot", "--skip_plot",
-                                dest="skip_plot",
-                                action="store_true",
-                                default=False,
-                                required=False,
-                                help="Skip PR curve plotting"
-                                )
+                                  dest="skip_plot",
+                                  action="store_true",
+                                  default=False,
+                                  required=False,
+                                  help="Skip PR curve plotting"
+                                  )
     #############################################
     # Peaks subparser
     #############################################
+    # Add a subparser for the peaks function
     peaks_parser = subparsers.add_parser("peaks",
                                          parents=[parent_parser],
                                          help="Call peaks on a maxATAC prediction bigwig."
@@ -830,8 +1163,8 @@ def get_parser():
                               nargs="+",
                               default=AUTOSOMAL_CHRS,
                               help="Chromosomes list for analysis. \
-                              Optionally with regions in a form of chrN:start-end. \
-                              Default: main human chromosomes, whole length"
+                                  Optionally with regions in a form of chrN:start-end. \
+                                  Default: main human chromosomes, whole length"
                               )
 
     peaks_parser.add_argument("--loglevel",
@@ -845,6 +1178,7 @@ def get_parser():
     #############################################
     # Variants subparser
     #############################################
+    # Add a subparser for the peaks function
     variants_parser = subparsers.add_parser("variants",
                                             parents=[parent_parser],
                                             help="Predict sequence specific transcription factor binding."
@@ -945,6 +1279,7 @@ def get_parser():
     #############################################
     # Prepare subparser
     #############################################
+    # Add a subparser for the prepare function
     prepare_parser = subparsers.add_parser("prepare",
                                            parents=[parent_parser],
                                            help="Prepare ATAC-seq data for maxATAC."
@@ -1036,9 +1371,11 @@ def get_parser():
                                 choices=LOG_LEVELS.keys(),
                                 help="Logging level. Default: " + DEFAULT_LOG_LEVEL
                                 )
+
     #############################################
     # Threshold subparser
     #############################################
+    # Add a subparser for the prepare function
     threshold_parser = subparsers.add_parser("threshold",
                                              parents=[parent_parser],
                                              help="Generate model threshold statistics."
@@ -1067,7 +1404,7 @@ def get_parser():
                                   nargs="+",
                                   default=DEFAULT_VALIDATE_CHRS,
                                   help="Chromosomes for thresholding predictions. \
-                                      Default: 1-22,X,Y"
+                                          Default: 1-22,X,Y"
                                   )
 
     threshold_parser.add_argument("--bin_size",
@@ -1118,7 +1455,6 @@ def print_args(args, logger, header="Arguments:\n", excl=["func"]):
     logger(header + dump(filtered))
 
 
-# we need to cwd_abs_path parameter only for running unit tests
 def parse_arguments(argsl, cwd_abs_path=None):
     """Parse user arguments
 
