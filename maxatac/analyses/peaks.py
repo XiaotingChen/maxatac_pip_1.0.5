@@ -20,7 +20,7 @@ def run_call_peaks(args):
         cutoff_value: The value associated to cutoff type, i.e. Precision 0.75
         cutoff_file: Chr2 cutoff file found in /maxATAC/data/models/YOUR_TF_MODEL/YOUR_TF_MODEL_validationPerformance_vs_thresholdCalibration.tsv
         output: The output directory to write the bed file
-    
+
     Return:
         Write BED file
     """
@@ -44,19 +44,18 @@ def run_call_peaks(args):
                            cutoff_val=args.cutoff_value)
 
     logging.info(f"Input filename: {args.input_bigwig}" +
-                 f"\n Target chroms: {args.chromosomes}" +
-                 f"\n Bin size: {args.BIN_SIZE}" +
-                 f"\n Cutoff type for Threshold: {args.cutoff_type}" +
-                 f"\n Cutoff value: {args.cutoff_value}" +
-                 f"\n Corresponding Threshold for Cutoff Type and Value discovered: {thresh}" +
-                 f"\n Filename prefix: {prefix}" +
-                 f"\n Output directory: {output_dir}" +
-                 f"\n Output filename: {results_filename}")
+                  f"\n Target chroms: {args.chromosomes}" +
+                  f"\n Bin size: {args.BIN_SIZE}" +
+                  f"\n Cutoff type for Threshold: {args.cutoff_type}" +
+                  f"\n Cutoff value: {args.cutoff_value}" +
+                  f"\n Corresponding Threshold for Cutoff Type and Value discovered: {thresh}" +
+                  f"\n Filename prefix: {prefix}" +
+                  f"\n Output directory: {output_dir}" +
+                  f"\n Output filename: {results_filename}")
 
     with Pool(int(multiprocessing.cpu_count())) as p:
         results_list = p.starmap(call_peaks_per_chromosome,
-                                 [(args.input_bigwig, chromosome, thresh, args.BIN_SIZE) for chromosome in
-                                  args.chromosomes]
+                                 [(args.input_bigwig, chromosome, thresh, args.BIN_SIZE) for chromosome in args.chromosomes]
                                  )
 
     logging.info("Combining results for all chromosomes.")

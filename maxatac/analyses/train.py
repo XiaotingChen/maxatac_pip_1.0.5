@@ -15,7 +15,7 @@ from maxatac.utilities.constants import (
     INPUT_CHANNELS,
     OUTPUT_LENGTH,
     BP_RESOLUTION,
-    MODEL_CONFIG_UPDATE_LIST,
+    MODEL_CONFIG_UPDATE_LIST
 )
 from maxatac.utilities.system_tools import Mute
 
@@ -35,7 +35,7 @@ with Mute():
         DataGen,
         dataset_mapping,
         update_model_config_from_args,
-        generate_tfds_files,
+        generate_tfds_files
     )
     from maxatac.utilities.plot import (
         export_binary_metrics,
@@ -46,6 +46,7 @@ with Mute():
     from maxatac.utilities.genome_tools import (
         build_chrom_sizes_dict,
     )
+
 
 
 def run_training(args):
@@ -103,9 +104,7 @@ def run_training(args):
     with open(args.model_config, "r") as f:
         model_config = json.load(f)
 
-    model_config = update_model_config_from_args(
-        model_config, args, MODEL_CONFIG_UPDATE_LIST
-    )
+    model_config=update_model_config_from_args(model_config,args,MODEL_CONFIG_UPDATE_LIST)
 
     # Initialize the model with the architecture of choice
     maxatac_model = MaxATACModel(
@@ -193,6 +192,7 @@ def run_training(args):
         logging.info("Generating tfds files completed!")
         sys.exit()
 
+
     # Specify max_que_size
     if args.max_queue_size:
         queue_size = int(args.max_queue_size)
@@ -243,9 +243,8 @@ def run_training(args):
             train_data_chip = train_data_chip.concatenate(chip_tfds[k])
 
     # re-assign steps_per_epoch_v2 here
-    steps_per_epoch_v2 = int(
-        train_data_chip.cardinality().numpy()
-        // np.ceil((args.batch_size / (1.0 + float(args.ATAC_Sampling_Multiplier))))
+    steps_per_epoch_v2 = int(train_data_chip.cardinality().numpy() // np.ceil(
+        (args.batch_size / (1.0 + float(args.ATAC_Sampling_Multiplier))))
     )
 
     train_data = (
@@ -314,10 +313,18 @@ def run_training(args):
         args,
         model_config,
         extra={
-            "training CHIP ROI total regions": train_examples.ROI_pool_CHIP.shape[0],
-            "training ATAC ROI total regions": train_examples.ROI_pool_ATAC.shape[0],
-            "validate CHIP ROI total regions": validate_examples.ROI_pool_CHIP.shape[0],
-            "validate ATAC ROI total regions": validate_examples.ROI_pool_ATAC.shape[0],
+            "training CHIP ROI total regions": train_examples.ROI_pool_CHIP.shape[
+                0
+            ],
+            "training ATAC ROI total regions": train_examples.ROI_pool_ATAC.shape[
+                0
+            ],
+            "validate CHIP ROI total regions": validate_examples.ROI_pool_CHIP.shape[
+                0
+            ],
+            "validate ATAC ROI total regions": validate_examples.ROI_pool_ATAC.shape[
+                0
+            ],
             "training CHIP ROI unique regions": train_examples.ROI_pool_unique_region_size_CHIP,
             "training ATAC ROI unique regions": train_examples.ROI_pool_unique_region_size_ATAC,
             "validate CHIP ROI unique regions": validate_examples.ROI_pool_unique_region_size_CHIP,

@@ -19,6 +19,7 @@ from maxatac.utilities import constants
 from maxatac.architectures.dcnn import get_dilated_cnn
 from maxatac.architectures.multiinput_transformers import get_multiinput_transformer
 
+
 from maxatac.utilities.constants import (
     BP_RESOLUTION,
     BATCH_SIZE,
@@ -823,7 +824,7 @@ class DataGen:
         self.flanking_padding_size = flanking_padding_size
         self.window_size = window_size
         self.override_shrinkage_factor = override_shrinkage_factor
-        self.suppress_cell_type_TN_weight = suppress_cell_type_TN_weight
+        self.suppress_cell_type_TN_weight=suppress_cell_type_TN_weight
 
         if self.chip == False:
             self.roi_pool["Weight shrinkage factor"] = 1.0 / float(
@@ -930,10 +931,8 @@ class DataGen:
 
             if self.suppress_cell_type_TN_weight:
                 bin_vector_sum = np.sum(bin_vector)
-                if bin_vector_sum == 0:
-                    weight_shrinkage_factor = 1.0 / float(
-                        self.chip_sample_weight_baseline
-                    )  # so this gets sample_weight back to 1 for cell type specific TN samples
+                if bin_vector_sum==0:
+                    weight_shrinkage_factor=1.0/float(self.chip_sample_weight_baseline) # so this gets sample_weight back to 1 for cell type specific TN samples
 
             # Append the sample to the target batch
             # targets_batch.append(bin_vector)
@@ -1700,6 +1699,7 @@ class GenomicRegions(object):
         return df
 
 
+
 def save_metadata(output_dir, args, model_config=None, extra=None):
     """
     Save the metadata every time the model is run
@@ -1774,13 +1774,11 @@ def CHIP_sample_weight_adjustment(CHIP_roi_df):
         ["Chr", "Start", "Stop", "ROI_Type", "Cell_Line", "Weight shrinkage factor"]
     ]
 
-
-def update_model_config_from_args(model_config, args, keys):
+def update_model_config_from_args(model_config,args,keys):
     for key in keys:
-        model_config[key] = getattr(args.key)
+        model_config[key]=getattr(args.key)
 
     return model_config
-
 
 def peak_centric_map_tf(x, y, w):
     shift = tf.constant(512, dtype=tf.int32)
@@ -1794,7 +1792,6 @@ def peak_centric_map_tf(x, y, w):
         w,
     )
 
-
 def random_shuffling_map_tf(x, y, w):
     shift = tf.random.uniform([1], minval=0, maxval=INPUT_LENGTH, dtype=tf.int32)[0]
     y_shift = tf.cast(tf.math.divide_no_nan(shift, OUTPUT_LENGTH), dtype=tf.int32)
@@ -1807,17 +1804,14 @@ def random_shuffling_map_tf(x, y, w):
         w,
     )
 
-
-def no_mapping_tf(x, y, w):
-    return x, y, w
-
+def no_mapping_tf(x,y,w):
+  return x,y,w
 
 dataset_mapping = {
     "random": random_shuffling_map_tf,
     "peak_centric": peak_centric_map_tf,
     "no_map": no_mapping_tf,
 }
-
 
 def generate_tfds_files(
     args, maxatac_model, train_examples, validate_examples, model_config

@@ -14,7 +14,6 @@ def run_averaging(args):
 
     This function can take a list of input bigwig files and averages their scores using pyBigWig. The only requirement
     for the bigwig files is that they contain the same chromosomes or there might be an error about retrieving scores.
-
     ________________________
     Workflow Overview
 

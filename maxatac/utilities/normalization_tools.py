@@ -96,7 +96,7 @@ def get_genomic_stats(bigwig_path: str,
         return min_value, max_value, median_value, mean_value, std_value
 
 
-def minmax_normalize_array(array: np.array, min_value: int, max_value: int, clip: bool=False):
+def minmax_normalize_array(array: np.array, min_value: int, max_value: int, clip: bool = False):
     """MinMax normalize the numpy array based on the genomic min and max
 
     Args:
@@ -107,9 +107,9 @@ def minmax_normalize_array(array: np.array, min_value: int, max_value: int, clip
 
     Returns:
         min-max normalized array: An array that has been min-max normalized
-        
+
     Examples:
-    
+
     >>> normalized_array = minmax_normalize_array(chr1_array, 0, 1, False)
     """
     normalized_array = (array - min_value) / (max_value - min_value)
@@ -118,6 +118,7 @@ def minmax_normalize_array(array: np.array, min_value: int, max_value: int, clip
         normalized_array = np.clip(normalized_array, 0, 1)
 
     return normalized_array
+
 
 def median_mad_normalize_array(array, median, mad):
     """

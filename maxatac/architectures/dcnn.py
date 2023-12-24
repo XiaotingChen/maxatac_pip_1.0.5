@@ -46,12 +46,12 @@ with Mute():
 
 
 def loss_function(
-        y_true,
-        y_pred,
-        y_pred_min=0.0000001,  # 1e-7
-        y_pred_max=0.9999999,  # 1 - 1e-7
-        y_true_min=-0.5,
-        flanking_truncation_size=0,
+    y_true,
+    y_pred,
+    y_pred_min=0.0000001,  # 1e-7
+    y_pred_max=0.9999999,  # 1 - 1e-7
+    y_true_min=-0.5,
+    flanking_truncation_size=0,
 ):
     _shape = y_true.shape
     if len(_shape) == 1:  # per sample
@@ -92,10 +92,10 @@ def loss_function(
 
 class loss_function_class(tf.keras.losses.Loss):
     def __init__(
-            self,
-            name="loss",
-            reduction=tf.keras.losses.Reduction.NONE,
-            flanking_truncation_size=0,
+        self,
+        name="loss",
+        reduction=tf.keras.losses.Reduction.NONE,
+        flanking_truncation_size=0,
     ):
         super(loss_function_class, self).__init__(name=name, reduction=reduction)
         self.flanking_truncation_size = flanking_truncation_size
@@ -143,13 +143,13 @@ class loss_function_class(tf.keras.losses.Loss):
 
 class loss_function_focal_class(tf.keras.losses.Loss):
     def __init__(
-            self,
-            name="focal_loss",
-            reduction=tf.keras.losses.Reduction.AUTO,
-            alpha=0.25,
-            gamma=2.0,
-            apply_class_balancing=False,
-            flanking_truncation_size=0,
+        self,
+        name="focal_loss",
+        reduction=tf.keras.losses.Reduction.AUTO,
+        alpha=0.25,
+        gamma=2.0,
+        apply_class_balancing=False,
+        flanking_truncation_size=0,
     ):
         super(loss_function_focal_class, self).__init__(name=name, reduction=reduction)
         self.alpha = alpha
@@ -193,25 +193,25 @@ class loss_function_focal_class(tf.keras.losses.Loss):
 
         _size = y_true.shape[0]
         _alpha_weight = np.ones(_size) * self.alpha * y_true + np.ones(_size) * (
-                1 - self.alpha
+            1 - self.alpha
         ) * (np.ones(_size) - y_true)
 
         if self.apply_class_balancing:
             losses = tf.boolean_mask(
                 tensor=-y_true
-                       * K.log(y_pred)
-                       * K.pow(1 - y_pred, self.gamma)
-                       * _alpha_weight
-                       - (1 - y_true)
-                       * K.log(1 - y_pred)
-                       * K.pow(y_pred, self.gamma)
-                       * _alpha_weight,
+                * K.log(y_pred)
+                * K.pow(1 - y_pred, self.gamma)
+                * _alpha_weight
+                - (1 - y_true)
+                * K.log(1 - y_pred)
+                * K.pow(y_pred, self.gamma)
+                * _alpha_weight,
                 mask=K.greater_equal(y_true, self.y_true_min),
             )
         else:
             losses = tf.boolean_mask(
                 tensor=-y_true * K.log(y_pred) * K.pow(1 - y_pred, self.gamma)
-                       - (1 - y_true) * K.log(1 - y_pred) * K.pow(y_pred, self.gamma),
+                - (1 - y_true) * K.log(1 - y_pred) * K.pow(y_pred, self.gamma),
                 mask=K.greater_equal(y_true, self.y_true_min),
             )
         losses = tf.cast(losses, tf.float32)
@@ -261,8 +261,7 @@ def spearman(y_true, y_pred):
 
 
 def dice_coef(
-        y_true, y_pred, y_true_min=-0.5, unknown_coef=10, flanking_truncation_size=0
-
+    y_true, y_pred, y_true_min=-0.5, unknown_coef=10, flanking_truncation_size=0
 ):
     _shape = y_true.shape
     if len(_shape) == 1:  # per sample
@@ -293,9 +292,7 @@ def dice_coef(
 
     y_true = K.flatten(y_true)
     y_pred = K.flatten(y_pred)
-
     mask = K.cast(K.greater_equal(y_true, y_true_min), dtype="float32")
-
     intersection = K.sum(y_true * y_pred * mask)
     numerator = 2.0 * intersection + unknown_coef
     denominator = K.sum(y_true * mask) + K.sum(y_pred * mask) + unknown_coef
@@ -304,12 +301,12 @@ def dice_coef(
 
 class dice_coef_class(tf.keras.metrics.Metric):
     def __init__(
-            self,
-            name="dice_coef",
-            y_true_min=-0.5,
-            unknown_coef=10,
-            flanking_truncation_size=0,
-            **kwargs
+        self,
+        name="dice_coef",
+        y_true_min=-0.5,
+        unknown_coef=10,
+        flanking_truncation_size=0,
+        **kwargs
     ):
         super(dice_coef_class, self).__init__(name=name, **kwargs)
         self.y_true_min = y_true_min
@@ -446,7 +443,7 @@ def coeff_determination(y_true, y_pred):
 
 
 def get_multihead_attention(
-        inbound_layer, num_heads, key_dim, filters, kernel_size, activation, padding, n
+    inbound_layer, num_heads, key_dim, filters, kernel_size, activation, padding, n
 ):
     """
     Return an Embedding + Multi Head Attention model
@@ -471,25 +468,25 @@ def get_residual_layer(inbound_layer, transformed_layer, activation):
 
 
 def get_layer(
-        inbound_layer,
-        filters,
-        kernel_size,
-        activation,
-        padding,
-        dilation_rate=1,
-        skip_batch_norm=False,
-        kernel_initializer="glorot_uniform",
-        concat_layer=None,
-        transpose_kernel_size=None,
-        transpose_strides=None,
-        n=2,
-        use_bias=True,
-        name=None,
-        pre_activation=False,
-        focal_initializing=False,
-        regularization=False,
-        l1=0.0,
-        l2=0.0,
+    inbound_layer,
+    filters,
+    kernel_size,
+    activation,
+    padding,
+    dilation_rate=1,
+    skip_batch_norm=False,
+    kernel_initializer="glorot_uniform",
+    concat_layer=None,
+    transpose_kernel_size=None,
+    transpose_strides=None,
+    n=2,
+    use_bias=True,
+    name=None,
+    pre_activation=False,
+    focal_initializing=False,
+    regularization=False,
+    l1=0.0,
+    l2=0.0,
 ):
     """
     Returns new layer without max pooling. If concat_layer,
@@ -498,9 +495,7 @@ def get_layer(
     can skip batch normalization
     """
     for i in range(n):
-
         if pre_activation:
-
             inbound_layer = BatchNormalization()(inbound_layer)
             inbound_layer = tf.keras.layers.Activation(activation)(inbound_layer)
             inbound_layer = Conv1D(
@@ -553,28 +548,28 @@ def get_layer(
 
 
 def get_dilated_cnn(
-        output_activation,
-        model_config,
-        adam_learning_rate=DEFAULT_ADAM_LEARNING_RATE,
-        adam_decay=DEFAULT_ADAM_DECAY,
-        input_length=INPUT_LENGTH,
-        input_channels=INPUT_CHANNELS,
-        input_filters=INPUT_FILTERS,
-        input_kernel_size=INPUT_KERNEL_SIZE,
-        input_activation=INPUT_ACTIVATION,
-        output_filters=OUTPUT_FILTERS,
-        output_kernel_size=OUTPUT_KERNEL_SIZE,
-        filters_scaling_factor=FILTERS_SCALING_FACTOR,
-        dilation_rate=DILATION_RATE,
-        output_length=OUTPUT_LENGTH,
-        conv_blocks=CONV_BLOCKS,
-        padding=PADDING,
-        pool_size=POOL_SIZE,
-        adam_beta_1=ADAM_BETA_1,
-        adam_beta_2=ADAM_BETA_2,
-        target_scale_factor=1,
-        dense_b=False,
-        weights=None,
+    output_activation,
+    model_config,
+    adam_learning_rate=DEFAULT_ADAM_LEARNING_RATE,
+    adam_decay=DEFAULT_ADAM_DECAY,
+    input_length=INPUT_LENGTH,
+    input_channels=INPUT_CHANNELS,
+    input_filters=INPUT_FILTERS,
+    input_kernel_size=INPUT_KERNEL_SIZE,
+    input_activation=INPUT_ACTIVATION,
+    output_filters=OUTPUT_FILTERS,
+    output_kernel_size=OUTPUT_KERNEL_SIZE,
+    filters_scaling_factor=FILTERS_SCALING_FACTOR,
+    dilation_rate=DILATION_RATE,
+    output_length=OUTPUT_LENGTH,
+    conv_blocks=CONV_BLOCKS,
+    padding=PADDING,
+    pool_size=POOL_SIZE,
+    adam_beta_1=ADAM_BETA_1,
+    adam_beta_2=ADAM_BETA_2,
+    target_scale_factor=1,
+    dense_b=False,
+    weights=None,
 ):
     """
     If weights are provided they will be loaded into created model
@@ -662,13 +657,13 @@ def get_dilated_cnn(
         metrics=[dice_coef],
         weighted_metrics=[
             MeanMetricWrapper(
-                dice_coef_class(
-                    flanking_truncation_size=model_config[
-                        "LOSS_FLANKING_TRUNCATION_SIZE"
-                    ]
-                ),
-                name="weighted_dice_coef",
-            )
+                    dice_coef_class(
+                        flanking_truncation_size=model_config[
+                            "LOSS_FLANKING_TRUNCATION_SIZE"
+                        ]
+                    ),
+                    name="weighted_dice_coef",
+                )
         ],
     )
 

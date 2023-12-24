@@ -19,7 +19,7 @@ def get_cpu_count(reserved=0.25):  # reserved is [0, 1)
     return 1 if avail_cpus == 0 else avail_cpus
 
 
-def get_dir(dir: str, permissions=0o0775, exist_ok : bool=True):
+def get_dir(dir: str, permissions=0o0775, exist_ok: bool = True):
     """Makes a directory at the given location
 
     Args:
@@ -29,9 +29,9 @@ def get_dir(dir: str, permissions=0o0775, exist_ok : bool=True):
 
     Returns:
         str: Absolute path to the created directory
-        
+
     Example:
-    
+
     >>> output_dir = get_dir("./output/")
     """
     abs_dir = get_absolute_path(dir)
@@ -91,6 +91,7 @@ def setup_logger(log_level, log_format):
 
 
 class EmptyStream():
+
     def __enter__(self):
         return None
 
@@ -135,7 +136,7 @@ def check_data_packages_installed():
         subprocess.run(["which", "git"], stdout=subprocess.DEVNULL, check=True)
     except subprocess.CalledProcessError as e:
         raise_exception(e, "git", "conda install git")
-        
+
     try:
         subprocess.run(["which", "wget"], stdout=subprocess.DEVNULL, check=True)
     except subprocess.CalledProcessError as e:
@@ -161,17 +162,17 @@ def check_prepare_packages_installed():
         subprocess.run(["which", "samtools"], stdout=subprocess.DEVNULL, check=True)
     except subprocess.CalledProcessError as e:
         raise_exception(e, "samtools", "http://www.htslib.org/")
-        
+
     try:
         subprocess.run(["which", "bedtools"], stdout=subprocess.DEVNULL, check=True)
     except subprocess.CalledProcessError as e:
         raise_exception(e, "bedtools", "https://bedtools.readthedocs.io/")
-        
+
     try:
         subprocess.run(["which", "pigz"], stdout=subprocess.DEVNULL, check=True)
     except subprocess.CalledProcessError as e:
         raise_exception(e, "pigz", "https://zlib.net/pigz/")
-        
+
     try:
         subprocess.run(["which", "bedGraphToBigWig"], stdout=subprocess.DEVNULL, check=True)
     except subprocess.CalledProcessError as e:

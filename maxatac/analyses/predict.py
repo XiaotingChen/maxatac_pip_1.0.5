@@ -1,5 +1,4 @@
-"""
-Predict TF binding with a maxATAC model
+"""Predict TF binding with a maxATAC model
 """
 import logging
 import os
@@ -68,7 +67,7 @@ def run_prediction(args):
         args.chromosomes = all_chr
 
     # Create the output directory set by the parser
-	logging.info(f"Make output directory: {args.output_directory}")
+    logging.info(f"Make output directory: {args.output_directory}")
     output_directory = get_dir(args.output_directory)
 
     # Open the training args JSON file
@@ -93,7 +92,7 @@ def run_prediction(args):
                                                  chrom_sizes=args.chrom_sizes,
                                                  blacklist=args.blacklist,
                                                  step_size=args.step_size,
-												 peaks=args.roi,
+                                                 peaks=args.roi,
                                                  windows=args.windows
                                                  )
 
@@ -102,26 +101,36 @@ def run_prediction(args):
     chrom_list = list(set(args.chromosomes).intersection(set(regions_pool["chr"].unique())))
 
     logging.info("Prediction Parameters \n" +
-                 f"Output filename: {outfile_name_bigwig} \n" +
-                 f"Target signal: {args.signal} \n" +
-                 f"Sequence data: {args.sequence} \n" +
-                 f"Model: {args.model} \n" +
-                 "Chromosome requested: \n   - " + "\n    -".join(args.chromosomes) + "\n" +
-                 "Chromosomes in final prediction set: \n   - " + "\n    -".join(chrom_list) + "\n" +
-                 f"Output directory: {output_directory} \n" +
-				 f"Batch Size: {args.batch_size} \n" +
-                 f"Output filename: {outfile_name_bigwig}"
-                 )
+                  f"Output filename: {outfile_name_bigwig} \n" +
+                  f"Target signal: {args.signal} \n" +
+                  f"Sequence data: {args.sequence} \n" +
+                  f"Model: {args.model} \n" +
+                  "Chromosome requested: \n   - " + "\n    -".join(args.chromosomes) + "\n" +
+                  "Chromosomes in final prediction set: \n   - " + "\n    -".join(chrom_list) + "\n" +
+                  f"Output directory: {output_directory} \n" +
+                  f"Batch Size: {args.batch_size} \n" +
+                  f"Output filename: {outfile_name_bigwig}"
+                  )
+
 
     with Pool(int(multiprocessing.cpu_count())) as p:
-        forward_strand_predictions = p.starmap(make_stranded_predictions,
-                                               [(regions_pool,
-                                                 args.signal,
-                                                 args.sequence,
-                                                 args.model,
-                                                 args.batch_size,
-                                                 False,
-                                                 chromosome) for chromosome in chrom_list])
+        forward_strand_predictions = p.starmap(
+            make_stranded_predictions,
+            [
+                (
+                    model_config,
+                    regions_pool,
+                    args.signal,
+                    args.sequence,
+                    args.model,
+                    args.batch_size,
+                    False,
+                    chromosome,
+                    train_args,
+                    model_config["INTER_FUSION"]
+               ) for chromosome in chrom_list
+            ]
+        )
 
     # Write the predictions to a bigwig file and add name to args
     prediction_bedgraph = pd.concat(forward_strand_predictions)

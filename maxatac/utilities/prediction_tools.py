@@ -146,8 +146,6 @@ def import_prediction_regions(bed_file: str,
 def create_prediction_regions(chromosomes: list,
                               chrom_sizes: dict,
                               blacklist: str,
-
-                              windows,
                               step_size: int = 256,
                               region_length: int = INPUT_LENGTH):
     """Create whole genome or chromosome prediction regions
@@ -156,9 +154,6 @@ def create_prediction_regions(chromosomes: list,
         chromosomes (list): List of chromosomes to create prediction regions for
         chrom_sizes (dict): A dictionary of chromosome sizes
         blacklist (str): Path to the blacklist BED file
-        peaks (): Path to the bed file of intervals to center predictions on
-        windows (): Path to the bed file of intervals to use for prediction windows. These will be intersected with
-        peaks file if peaks are provided.
         step_size (int, optional): The step size to use for sliding windows. Defaults to 256.
         region_length (int, optional): The region length for prediction. Defaults to INPUT_LENGTH.
 
@@ -176,7 +171,7 @@ def create_prediction_regions(chromosomes: list,
 
     else:
         logging.info(f"Creating prediction windows that are {region_length} bp wide with a {step_size} bp step")
-        # Create a bedtools object that is a windowed genome
+    # Create a bedtools object that is a windowed genome
         windows_bedtool = pybedtools.BedTool().window_maker(g=chrom_sizes,
                                                             w=region_length,
                                                             s=step_size)
@@ -455,7 +450,8 @@ def make_stranded_predictions(model_config: dict,
                               inter_fusion: bool = False,
                               number_intervals: int = 32,
                               input_channels: int = INPUT_CHANNELS,
-                              input_length: int = INPUT_LENGTH):
+                              input_length: int = INPUT_LENGTH
+                              ):
     chr_roi_pool = roi_pool[roi_pool["chr"] == chromosome].copy()
 
     logging.info("Load pre-trained model")

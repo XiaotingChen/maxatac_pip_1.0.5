@@ -10,7 +10,7 @@ import pybedtools
 
 def run_variants(args):
     """Predict TF binding using a variant call format file to make sequence specific predictions
-    
+
     Args:
         args ([type]): input_bigwig, sequence, models, chromosomes, variant_start_pos, nucleotide, overhang, output, name
     """

@@ -16,7 +16,7 @@ def get_roi_variant_overlap(variants_bed: str, roi_BT: pybedtools.BedTool):
 
     Returns:
         pd.Dataframe: A dataframe of roi and variant intersections annotated with the nucleotide and index to be changed.
-        
+
     Example:
     >>> intersection_df = get_roi_variant_overlap(variants_bed, roi_BT)
     """
@@ -24,8 +24,7 @@ def get_roi_variant_overlap(variants_bed: str, roi_BT: pybedtools.BedTool):
     variants_BT = pybedtools.BedTool(variants_bed)
 
     # Intersect ROI with variants bed file and convert to dataframe
-    intersect_df = roi_BT.intersect(variants_BT, loj=True).to_dataframe(
-        names=["chr", "start", "stop", "rs_chr", "rs_start", "rs_stop", "nucleotide"])
+    intersect_df = roi_BT.intersect(variants_BT, loj=True).to_dataframe(names=["chr", "start", "stop", "rs_chr", "rs_start", "rs_stop", "nucleotide"])
 
     row_indices = []
 
@@ -135,8 +134,7 @@ def convert_predictions_to_bedgraph(predictions: list,
     windowed_coordinates_dataframe.columns = ['chr', 'start', 'stop', 'score']
 
     # Get the mean of all sliding window predicitons
-    windowed_coordinates_dataframe = windowed_coordinates_dataframe.groupby(["chr", "start", "stop"],
-                                                                            as_index=False).mean()
+    windowed_coordinates_dataframe = windowed_coordinates_dataframe.groupby(["chr", "start", "stop"], as_index=False).mean()
 
     return windowed_coordinates_dataframe
 

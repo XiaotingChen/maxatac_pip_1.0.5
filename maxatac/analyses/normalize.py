@@ -13,7 +13,7 @@ from maxatac.utilities.normalization_tools import minmax_normalize_array, zscore
 def run_normalization(args):
     """
     Normalize a bigwig file
-    
+
     This function will normalize a bigwig array based on the desired method:
 
     -min-max
@@ -64,11 +64,11 @@ def run_normalization(args):
         logging.info("Calculating stats per chromosome")
 
         min_value, max_value, median, mean_value, std_value = get_genomic_stats(bigwig_path=args.signal,
-                                                                                chrom_sizes_dict=chromosome_length_dictionary,
-                                                                                blacklist_path=args.blacklist_bw,
-                                                                                max_percentile=args.max_percentile,
-                                                                                name=args.name,
-                                                                                output_dir=output_dir)
+                                                                                     chrom_sizes_dict=chromosome_length_dictionary,
+                                                                                     blacklist_path=args.blacklist_bw,
+                                                                                     max_percentile=args.max_percentile,
+                                                                                     name=args.name,
+                                                                                     output_dir=output_dir)
 
         logging.info("Sample Statistics" +
                       "\n  Genomic minimum value: " + str(min_value) +
