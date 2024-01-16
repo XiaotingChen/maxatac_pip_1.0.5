@@ -45,6 +45,7 @@ with Mute():
     )
     from tensorflow.keras.metrics import MeanMetricWrapper
 
+
 def loss_function(
     y_true,
     y_pred,
@@ -659,13 +660,13 @@ def get_dilated_cnn(
         metrics=[dice_coef],
         weighted_metrics=[
             MeanMetricWrapper(
-                    dice_coef_class(
-                        flanking_truncation_size=model_config[
-                            "LOSS_FLANKING_TRUNCATION_SIZE"
-                        ]
-                    ),
-                    name="weighted_dice_coef",
-                )
+                dice_coef_class(
+                    flanking_truncation_size=model_config[
+                        "LOSS_FLANKING_TRUNCATION_SIZE"
+                    ]
+                ),
+                name="weighted_dice_coef",
+            )
         ],
     )
 
@@ -782,7 +783,6 @@ def get_dilated_cnn_with_attention(
             activation=output_activation,
             kernel_initializer="glorot_uniform",
         )(output_layer)
-
 
     logging.debug("Added outputs layer: " + "\n - " + str(output_layer))
 

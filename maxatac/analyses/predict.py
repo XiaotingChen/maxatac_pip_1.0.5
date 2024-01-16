@@ -12,8 +12,12 @@ from maxatac.utilities.system_tools import get_dir, Mute
 
 with Mute():
     from maxatac.utilities.genome_tools import build_chrom_sizes_dict
-    from maxatac.utilities.prediction_tools import write_predictions_to_bigwig, \
-        import_prediction_regions, create_prediction_regions, make_stranded_predictions
+    from maxatac.utilities.prediction_tools import (
+        write_predictions_to_bigwig,
+        import_prediction_regions,
+        create_prediction_regions,
+        make_stranded_predictions,
+    )
     from maxatac.utilities.constants import DATA_PATH
     from maxatac.analyses.peaks import run_call_peaks
 
@@ -35,7 +39,7 @@ def run_prediction(args):
 
     1) Create directories and set up filenames
     2) Prepare regions for prediction. Either import user defined regions or create regions based on chromosomes list.
-    3) Make predictions on the reference strand. 
+    3) Make predictions on the reference strand.
     3) Convert predictions to bigwig format and write results.
 
     Args:
@@ -47,18 +51,23 @@ def run_prediction(args):
 
     # If the user provides the TF name,
     if args.TF:
-        args.model = glob.glob(os.path.join(DATA_PATH, "models", args.TF, args.TF + "*.h5"))[0]
-        
-        args.cutoff_file = glob.glob(os.path.join(DATA_PATH, "models", args.TF, args.TF + "*.tsv"))[0]
-        
+        args.model = glob.glob(
+            os.path.join(DATA_PATH, "models", args.TF, args.TF + "*.h5")
+        )[0]
+
+        args.cutoff_file = glob.glob(
+            os.path.join(DATA_PATH, "models", args.TF, args.TF + "*.tsv")
+        )[0]
+
     else:
         pass
-    
+
     logging.error(f"Using maxATAC model: {args.model} to make predictions")
-    
+
     # predict on all chromosomes
-    if args.chromosomes[0] == 'all':
+    if args.chromosomes[0] == "all":
         from maxatac.utilities.constants import AUTOSOMAL_CHRS as all_chr
+
         args.chromosomes = all_chr
 
     # Create the output directory set by the parser
@@ -78,49 +87,56 @@ def run_prediction(args):
     # The function build_chrom_sizes_dict is used to make sure regions fall within chromosome bounds.
     # Create a dictionary of chromosome sizes used to make the bigwig files
     chrom_sizes_dict = build_chrom_sizes_dict(args.chromosomes, args.chromosome_sizes)
-    
+
     # Import the regions for prediction.
     if args.roi:
         logging.error("Import prediction regions")
-        regions_pool = import_prediction_regions(bed_file=args.roi,
-                                                 chromosomes=args.chromosomes,
-                                                 chrom_sizes_dictionary=chrom_sizes_dict,
-                                                 blacklist=args.blacklist,
-                                                 step_size=args.step_size
-                                                 )
-        
+        regions_pool = import_prediction_regions(
+            bed_file=args.roi,
+            chromosomes=args.chromosomes,
+            chrom_sizes_dictionary=chrom_sizes_dict,
+            blacklist=args.blacklist,
+            step_size=args.step_size,
+        )
+
         # Find the chromosomes for which we can make predictions based on the requested chroms
         # and the BED regions provided in the ROI file
-        chrom_list = list(set(args.chromosomes).intersection(set(regions_pool["chr"].unique())))
-        
+        chrom_list = list(
+            set(args.chromosomes).intersection(set(regions_pool["chr"].unique()))
+        )
+
     else:
         logging.error("Create prediction regions")
-        regions_pool = create_prediction_regions(chromosomes=args.chromosomes,
-                                                 chrom_sizes=args.chromosome_sizes,
-                                                 blacklist=args.blacklist,
-                                                 step_size=args.step_size
-                                                 )  # this is a pandas Dataframe
+        regions_pool = create_prediction_regions(
+            chromosomes=args.chromosomes,
+            chrom_sizes=args.chromosome_sizes,
+            blacklist=args.blacklist,
+            step_size=args.step_size,
+        )  # this is a pandas Dataframe
 
-        
         chrom_list = args.chromosomes
         if args.debug:
             regions_pool.to_csv(f"{output_directory}/regions_pool.csv")
-    
-    logging.error("Prediction Parameters \n" +
-                  f"Output filename: {outfile_name_bigwig} \n" +
-                  f"Target signal: {args.signal} \n" +
-                  f"Sequence data: {args.sequence} \n" +
-                  f"Model: {args.model} \n" +
-                  "Chromosome requested: \n   - " + "\n    -".join(args.chromosomes) + "\n" +
-                  "Chromosomes in final prediction set: \n   - " + "\n    -".join(chrom_list) + "\n" +
-                  f"Output directory: {output_directory} \n" +
-                  f"Batch Size: {args.batch_size} \n" +
-                  f"Output filename: {outfile_name_bigwig}"
-                  )
 
+    logging.error(
+        "Prediction Parameters \n"
+        + f"Output filename: {outfile_name_bigwig} \n"
+        + f"Target signal: {args.signal} \n"
+        + f"Sequence data: {args.sequence} \n"
+        + f"Model: {args.model} \n"
+        + "Chromosome requested: \n   - "
+        + "\n    -".join(args.chromosomes)
+        + "\n"
+        + "Chromosomes in final prediction set: \n   - "
+        + "\n    -".join(chrom_list)
+        + "\n"
+        + f"Output directory: {output_directory} \n"
+        + f"Batch Size: {args.batch_size} \n"
+        + f"Output filename: {outfile_name_bigwig}"
+    )
 
     ## The reason why this is put through multiprocessing is probably each thread deals with one chromosome, as there's a whole chrom_list
-    #if args.multiprocessing and args.multiprocessing != "False":
+    # if args.multiprocessing and args.multiprocessing != "False":
     #    with Pool(int(multiprocessing.cpu_count())) as p:
     #        forward_strand_predictions = p.starmap(make_stranded_predictions,
     #                                            [(regions_pool,
@@ -130,21 +146,25 @@ def run_prediction(args):
     #                                                args.batch_size,
     #                                                False,
     #                                                chromosome) for chromosome in chrom_list])
-    if False: pass
+    if False:
+        pass
     else:
         forward_strand_predictions = []
         for chromosome in chrom_list:
-            forward_strand_predictions.append(make_stranded_predictions(
-                                                                    model_config,
-                                                                    regions_pool,
-                                                                    args.signal,
-                                                                    args.sequence,
-                                                                    args.model,
-                                                                    args.batch_size,
-                                                                    False,
-                                                                    chromosome,
-                                                                    train_args=train_args,
-                                                                    inter_fusion=model_config["INTER_FUSION"]))
+            forward_strand_predictions.append(
+                make_stranded_predictions(
+                    model_config,
+                    regions_pool,
+                    args.signal,
+                    args.sequence,
+                    args.model,
+                    args.batch_size,
+                    False,
+                    chromosome,
+                    train_args=train_args,
+                    inter_fusion=model_config["INTER_FUSION"],
+                )
+            )
 
     logging.error("Write predictions to a bigwig file")
 
@@ -152,13 +172,14 @@ def run_prediction(args):
     prediction_bedgraph = pd.concat(forward_strand_predictions)
     if args.debug:
         prediction_bedgraph.to_csv(f"{output_directory}/prediction_bedgraph.csv")
-    
-    write_predictions_to_bigwig(prediction_bedgraph,
-                                output_filename=outfile_name_bigwig,
-                                chrom_sizes_dictionary=chrom_sizes_dict,
-                                chromosomes=chrom_list
-                                )
-    
+
+    write_predictions_to_bigwig(
+        prediction_bedgraph,
+        output_filename=outfile_name_bigwig,
+        chrom_sizes_dictionary=chrom_sizes_dict,
+        chromosomes=chrom_list,
+    )
+
     # If a cutoff file is provided, call peaks
     if args.cutoff_file:
         args.input_bigwig = outfile_name_bigwig

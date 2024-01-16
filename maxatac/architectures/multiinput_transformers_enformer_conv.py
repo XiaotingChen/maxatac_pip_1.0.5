@@ -24,24 +24,39 @@ with Mute():
     from tensorflow.keras.models import Model
     from tensorflow.keras.optimizers import Adam
 
-    #from maxatac.utilities.constants import KERNEL_INITIALIZER, INPUT_LENGTH, INPUT_CHANNELS, INPUT_FILTERS, \
+    # from maxatac.utilities.constants import KERNEL_INITIALIZER, INPUT_LENGTH, INPUT_CHANNELS, INPUT_FILTERS, \
     #    INPUT_KERNEL_SIZE, INPUT_ACTIVATION, OUTPUT_FILTERS, OUTPUT_KERNEL_SIZE, FILTERS_SCALING_FACTOR, DILATION_RATE, \
     #    OUTPUT_LENGTH, CONV_BLOCKS, PADDING, POOL_SIZE, ADAM_BETA_1, ADAM_BETA_2, DEFAULT_ADAM_LEARNING_RATE, \
     #    DEFAULT_ADAM_DECAY, NUM_HEADS, NUM_MHA, KEY_DIMS, D_FF, CONV_TOWER_CONFIGS, EMBEDDING_SIZE, POOL_SIZE_BEFORE_FLATTEN, \
     #    DOWNSAMPLE_METHOD_CONV_TOWER, INCEPTION_BRANCHES, WHOLE_ATTENTION_KWARGS, USE_RPE, DM_DROPOUT_RATE, CONV_TOWER_CONFIGS_FUSION, \
     #    GENOME_CONV_TOWER, ATAC_CONV_TOWER
 
-    from maxatac.utilities.constants import KERNEL_INITIALIZER, INPUT_LENGTH, INPUT_CHANNELS, INPUT_FILTERS, \
-        INPUT_KERNEL_SIZE, INPUT_ACTIVATION, OUTPUT_FILTERS, OUTPUT_KERNEL_SIZE, FILTERS_SCALING_FACTOR, DILATION_RATE, \
-        OUTPUT_LENGTH, CONV_BLOCKS, PADDING, POOL_SIZE, ADAM_BETA_1, ADAM_BETA_2, DEFAULT_ADAM_LEARNING_RATE, \
-        DEFAULT_ADAM_DECAY
+    from maxatac.utilities.constants import (
+        KERNEL_INITIALIZER,
+        INPUT_LENGTH,
+        INPUT_CHANNELS,
+        INPUT_FILTERS,
+        INPUT_KERNEL_SIZE,
+        INPUT_ACTIVATION,
+        OUTPUT_FILTERS,
+        OUTPUT_KERNEL_SIZE,
+        FILTERS_SCALING_FACTOR,
+        DILATION_RATE,
+        OUTPUT_LENGTH,
+        CONV_BLOCKS,
+        PADDING,
+        POOL_SIZE,
+        ADAM_BETA_1,
+        ADAM_BETA_2,
+        DEFAULT_ADAM_LEARNING_RATE,
+        DEFAULT_ADAM_DECAY,
+    )
 
     from maxatac.architectures.dcnn import loss_function, dice_coef, get_layer
     from maxatac.architectures.attention_module_TF import TransformerBlock
 
-def get_inception_block(
-    inbound_layer, inception_branches, base_name
-):
+
+def get_inception_block(inbound_layer, inception_branches, base_name):
     """
     Get an inception block. The motivation is that, the motif can have multiple lengths, so using the inception block with multiple paths may capture this pattern
     Let's say the input has shape (batch, seq_len, embed_dim), after inception it is (batch, seq_len, embed_dim)
@@ -50,41 +65,42 @@ def get_inception_block(
     """
     outputs = []
     embed_dim = inbound_layer.shape[-1]
-    assert embed_dim % len(inception_branches) == 0, "Embed dim has to be a multiple of number of branches"
+    assert (
+        embed_dim % len(inception_branches) == 0
+    ), "Embed dim has to be a multiple of number of branches"
     for i, branch in enumerate(inception_branches):
-
         # Each branch is a conv block with a conv + batch_norm + activation
         temp_layer = inbound_layer
         for j, block in enumerate(branch):
             if block["name"] == "conv":
-                temp_layer = get_conv_block(temp_layer, block, f"{base_name}_branch_{i}_block_{j}")
+                temp_layer = get_conv_block(
+                    temp_layer, block, f"{base_name}_branch_{i}_block_{j}"
+                )
             else:
                 temp_layer = AveragePooling1D(
                     pool_size=block["pool_size"],
                     strides=block["stride"],
                     padding=block["padding"],
-                    name=f"{base_name}_avgpool_branch_{i}_block_{j}"
+                    name=f"{base_name}_avgpool_branch_{i}_block_{j}",
                 )(temp_layer)
 
         outputs.append(temp_layer)
 
     # Reshape the output into the desired shape
-    output_layer = tf.keras.layers.Concatenate(axis=-1)(outputs)    
+    output_layer = tf.keras.layers.Concatenate(axis=-1)(outputs)
     return output_layer
 
 
-def get_conv_block(
-    inbound_layer, conv_block_config, base_name
-):
+def get_conv_block(inbound_layer, conv_block_config, base_name):
     """
     Feed the input through some conv layers.
     This function is very similar to Tareian's get_layer function, with just some slight modification
     """
     for l in range(conv_block_config["num_layer"]):
         if conv_block_config["activation"] == "gelu":
-            #TODO
+            # TODO
             pass
-            #activation = gelu()
+            # activation = gelu()
         else:
             activation = tf.keras.layers.ReLU(name=base_name + f"_relu_{l+1}")
         inbound_layer = Conv1D(
@@ -93,17 +109,17 @@ def get_conv_block(
             padding=conv_block_config["padding"],
             strides=conv_block_config["stride"],
             activation=activation,
-            name=base_name + f"_conv_layer_{l+1}"
+            name=base_name + f"_conv_layer_{l+1}",
         )(inbound_layer)
-        inbound_layer = BatchNormalization(name=base_name + f"_batch_norm_{l+1}")(inbound_layer)
+        inbound_layer = BatchNormalization(name=base_name + f"_batch_norm_{l+1}")(
+            inbound_layer
+        )
         inbound_layer = activation(inbound_layer)
 
     return inbound_layer
 
 
-def get_conv_tower(
-    inbound_layer, conv_tower_configs, downsample_method, base_name
-):
+def get_conv_tower(inbound_layer, conv_tower_configs, downsample_method, base_name):
     """
     Feed the input through the tower of conv layers
     Input has shape (batch_size, 1024, 16)
@@ -113,52 +129,61 @@ def get_conv_tower(
         count += 1
         print(f"before conv block: {inbound_layer.shape}")
         inbound_layer = get_conv_block(
-            inbound_layer, 
+            inbound_layer,
             conv_block_config,
-            base_name=f"{base_name}_conv_tower_block_{count}"
+            base_name=f"{base_name}_conv_tower_block_{count}",
         )
         print(f"after conv block: {inbound_layer.shape}")
         # After each conv block, use maxpooling to reduce seq len by 2
         # set option to downsample whether with maxpooling or conv1d stride 2
         if downsample_method == "maxpooling":
-            inbound_layer = MaxPooling1D(pool_size=5, strides=2, padding="same", name=f"{base_name}_Conv_tower_block_{count}_maxpool")(inbound_layer)
+            inbound_layer = MaxPooling1D(
+                pool_size=5,
+                strides=2,
+                padding="same",
+                name=f"{base_name}_Conv_tower_block_{count}_maxpool",
+            )(inbound_layer)
         else:
-            inbound_layer = Conv1D(filters=conv_block_config["num_filters"], kernel_size=conv_block_config["kernel"], strides=2, padding="same", name=f"{base_name}_Conv_tower_block_{count}_downsampling_conv")(inbound_layer)
-    
+            inbound_layer = Conv1D(
+                filters=conv_block_config["num_filters"],
+                kernel_size=conv_block_config["kernel"],
+                strides=2,
+                padding="same",
+                name=f"{base_name}_Conv_tower_block_{count}_downsampling_conv",
+            )(inbound_layer)
+
     return inbound_layer
 
 
-def get_conv_block_enformer(
-    inbound_layer, conv_block_configs, base_name
-):
+def get_conv_block_enformer(inbound_layer, conv_block_configs, base_name):
     """
     ConvBlock, defined in Enformer's paper
     Includes: BN -> GeLU -> Conv
     """
     inbound_layer = BatchNormalization(name=base_name + f"_batch_norm")(inbound_layer)
-    inbound_layer = tf.nn.gelu(inbound_layer, name=base_name+f"_gelu")
+    inbound_layer = tf.nn.gelu(inbound_layer, name=base_name + f"_gelu")
     inbound_layer = Conv1D(
         filters=conv_block_configs["num_filters"],
         kernel_size=conv_block_configs["kernel"],
         padding=conv_block_configs["padding"],
         strides=conv_block_configs["stride"],
-        name=base_name + f"conv"
+        name=base_name + f"conv",
     )(inbound_layer)
     return inbound_layer
 
-def get_rconv_block_enformer(
-    inbound_layer, conv_block_configs, base_name
-):
+
+def get_rconv_block_enformer(inbound_layer, conv_block_configs, base_name):
     """
     RConvBlock, defined in Enformer's paper
     Includes a residual over the ConvBlock
     """
     conv_output = get_conv_block_enformer(inbound_layer, conv_block_configs, base_name)
-    return tf.keras.layers.Add(name=f"{base_name}_residual_add")([inbound_layer, conv_output])
+    return tf.keras.layers.Add(name=f"{base_name}_residual_add")(
+        [inbound_layer, conv_output]
+    )
 
-def get_stem_enformer(
-    inbound_layer, stem_config, base_name
-):
+
+def get_stem_enformer(inbound_layer, stem_config, base_name):
     """
     Stem layer, defined in Enformer's paper
     Includes conv -> ConvBlock -> MaxPool without downsampling
@@ -170,26 +195,27 @@ def get_stem_enformer(
         kernel_size=stem_config_conv["kernel"],
         padding=stem_config_conv["padding"],
         strides=stem_config_conv["stride"],
-        name=base_name + f"_stem_conv"
+        name=base_name + f"_stem_conv",
     )(inbound_layer)
     inbound_layer = get_rconv_block_enformer(
-        inbound_layer,
-        stem_config["rconv"],
-        base_name=base_name + f"_rconv"
+        inbound_layer, stem_config["rconv"], base_name=base_name + f"_rconv"
     )
     inbound_layer = MaxPooling1D(
-        pool_size=stem_config_maxpool["pool_size"], 
-        strides=stem_config_maxpool["strides"], 
-        padding=stem_config_maxpool["padding"], 
-        name=f"{base_name}_maxpool"
+        pool_size=stem_config_maxpool["pool_size"],
+        strides=stem_config_maxpool["strides"],
+        padding=stem_config_maxpool["padding"],
+        name=f"{base_name}_maxpool",
     )(inbound_layer)
     return inbound_layer
 
 
 def get_conv_tower_enformer(
-    inbound_layer, stem_enformer_configs, 
-    conv_block_enformer_configs, rconv_block_enformer_configs, maxpool_enformer_configs,
-    base_name
+    inbound_layer,
+    stem_enformer_configs,
+    conv_block_enformer_configs,
+    rconv_block_enformer_configs,
+    maxpool_enformer_configs,
+    base_name,
 ):
     """
     Get the conv tower in style of Enformer's conv tower (replace attentionpool with maxpool):
@@ -215,17 +241,15 @@ def get_conv_tower_enformer(
             inbound_layer, rconv, base_name=f"{base_name}_rconvblock_{i+1}"
         )
         inbound_layer = MaxPooling1D(
-            pool_size=maxpool["pool_size"], 
-            strides=maxpool["strides"], 
-            padding=maxpool["padding"], 
-            name=f"{base_name}_maxpool_{i+1}"
+            pool_size=maxpool["pool_size"],
+            strides=maxpool["strides"],
+            padding=maxpool["padding"],
+            name=f"{base_name}_maxpool_{i+1}",
         )(inbound_layer)
     return inbound_layer
 
 
-def get_positional_encoding(
-    inbound_layer, seq_len, depth, n=10000
-):
+def get_positional_encoding(inbound_layer, seq_len, depth, n=10000):
     """
     Return a positional encoding for the transformer,
     Input is the matrix I of shape (None, seq_len, embed_size)
@@ -233,42 +257,51 @@ def get_positional_encoding(
     The output is I + P
     """
     # Get a pos encoding layer (taken from https://www.tensorflow.org/text/tutorials/transformer#the_embedding_and_positional_encoding_layer)
-    depth = depth/2
+    depth = depth / 2
 
-    positions = np.arange(seq_len)[:, np.newaxis]     # (seq, 1)
-    depths = np.arange(depth)[np.newaxis, :]/depth   # (1, depth)
+    positions = np.arange(seq_len)[:, np.newaxis]  # (seq, 1)
+    depths = np.arange(depth)[np.newaxis, :] / depth  # (1, depth)
 
-    angle_rates = 1 / (n**depths)         # (1, depth)
-    angle_rads = positions * angle_rates      # (pos, depth)
+    angle_rates = 1 / (n**depths)  # (1, depth)
+    angle_rads = positions * angle_rates  # (pos, depth)
 
-    pos_encoding = np.concatenate(
-        [np.sin(angle_rads), np.cos(angle_rads)],
-        axis=-1)
+    pos_encoding = np.concatenate([np.sin(angle_rads), np.cos(angle_rads)], axis=-1)
 
     pos_encoding = tf.cast(pos_encoding, dtype=tf.float32)
     # Use Add layer to add the name to the layer
-    inbound_layer = tf.keras.layers.Add(name="Add_positional_encoding")([inbound_layer, pos_encoding[tf.newaxis, :seq_len, :]])
-    #inbound_layer = inbound_layer + pos_encoding[tf.newaxis, :seq_len, :]
+    inbound_layer = tf.keras.layers.Add(name="Add_positional_encoding")(
+        [inbound_layer, pos_encoding[tf.newaxis, :seq_len, :]]
+    )
+    # inbound_layer = inbound_layer + pos_encoding[tf.newaxis, :seq_len, :]
 
     return inbound_layer
 
-def get_multihead_attention(
-    inbound_layer, key_dim, num_heads
-):
+
+def get_multihead_attention(inbound_layer, key_dim, num_heads):
     """
     Get a multi head attention module
     """
     # Check correct dimensions
     embed_dim = inbound_layer.shape[-1]
-    assert embed_dim == key_dim*num_heads, "Embedding size has to be equal to key_dim * num heads"
-    mha, att_scores = tf.keras.layers.MultiHeadAttention(key_dim=key_dim, num_heads=num_heads)(query=inbound_layer, value=inbound_layer, return_attention_scores=True)
+    assert (
+        embed_dim == key_dim * num_heads
+    ), "Embedding size has to be equal to key_dim * num heads"
+    mha, att_scores = tf.keras.layers.MultiHeadAttention(
+        key_dim=key_dim, num_heads=num_heads
+    )(query=inbound_layer, value=inbound_layer, return_attention_scores=True)
     layer_norm = tf.keras.layers.LayerNormalization()(mha)
     inbound_layer = tf.keras.layers.Add()([inbound_layer, layer_norm])
 
     return inbound_layer, att_scores
 
+
 def get_feed_forward_nn(
-    inbound_layer, d_ff, base_name, activation_function="relu", bias1=True, bias2=True, 
+    inbound_layer,
+    d_ff,
+    base_name,
+    activation_function="relu",
+    bias1=True,
+    bias2=True,
 ):
     """
     Get the feed forward neural net right after multihead attention
@@ -278,17 +311,21 @@ def get_feed_forward_nn(
     """
     if activation_function == "relu":
         activation = tf.keras.layers.ReLU(name=base_name + "_relu")
-    
+
     embed_dim = inbound_layer.shape[-1]
     dense_1 = tf.keras.layers.Dense(d_ff, use_bias=bias1, name=base_name + "_dense_1")
-    dense_2 = tf.keras.layers.Dense(embed_dim, use_bias=bias2, name=base_name + "_dense_2")
-    layer_norm = tf.keras.layers.LayerNormalization(name=base_name + "_layernorm_in_ffnn")
+    dense_2 = tf.keras.layers.Dense(
+        embed_dim, use_bias=bias2, name=base_name + "_dense_2"
+    )
+    layer_norm = tf.keras.layers.LayerNormalization(
+        name=base_name + "_layernorm_in_ffnn"
+    )
     residual = tf.keras.layers.Add(name=base_name + "_residual_in_ffnn")
 
     ffnn_output = activation(dense_1(inbound_layer))
     ffnn_output = dense_2(ffnn_output)
     inbound_layer = residual([inbound_layer, layer_norm(ffnn_output)])
-    #inbound_layer = inbound_layer + layer_norm(ffnn_output)
+    # inbound_layer = inbound_layer + layer_norm(ffnn_output)
 
     return inbound_layer
 
@@ -302,7 +339,9 @@ def get_multihead_attention_custom(
     Implementation taken from https://nn.labml.ai/transformers/mha.html
     """
     embed_dim = inbound_layer.shape[-1]
-    assert embed_dim == key_dim*num_heads, "Embedding size has to be equal to key_dim * num heads"
+    assert (
+        embed_dim == key_dim * num_heads
+    ), "Embedding size has to be equal to key_dim * num heads"
     query = tf.keras.layers.Dense(embed_dim, name=base_name + "_Wq")
     key = tf.keras.layers.Dense(embed_dim, name=base_name + "_Wk")
     value = tf.keras.layers.Dense(embed_dim, name=base_name + "_Wv")
@@ -317,41 +356,50 @@ def get_multihead_attention_custom(
 
     # Take the dot product of wq and wk.T to produce (batch_size, num_heads, seq_len, seq_len)
     att_weights = tf.linalg.matmul(wq, tf.transpose(wk, perm=[0, 1, 3, 2]))
-    att_weights = att_weights * (1/math.sqrt(key_dim))
-    att_weights = tf.keras.layers.Softmax(axis=1, name=base_name + "_softmax_att_weights")(att_weights)
+    att_weights = att_weights * (1 / math.sqrt(key_dim))
+    att_weights = tf.keras.layers.Softmax(
+        axis=1, name=base_name + "_softmax_att_weights"
+    )(att_weights)
 
     # Multiply this with value to produce (batch_size, num_heads, seq_len, key_dim)
     output = tf.linalg.matmul(att_weights, wv)
 
     # Reshape to (batch_size, seq_len, embed_dim) and pass to another dense layer
     output = tf.reshape(output, (-1, seq_len, embed_dim))
-    output = tf.keras.layers.Dense(embed_dim, name=base_name + "_dense_after_mha")(output)
+    output = tf.keras.layers.Dense(embed_dim, name=base_name + "_dense_after_mha")(
+        output
+    )
 
     # Pass through layer norm and add residual
-    layer_norm = tf.keras.layers.LayerNormalization(name=base_name + "_layernorm_in_mha")(output)
-    output = tf.keras.layers.Add(name=base_name + "_residual_in_mha")([inbound_layer, layer_norm])
-    #inbound_layer = inbound_layer + layer_norm
+    layer_norm = tf.keras.layers.LayerNormalization(
+        name=base_name + "_layernorm_in_mha"
+    )(output)
+    output = tf.keras.layers.Add(name=base_name + "_residual_in_mha")(
+        [inbound_layer, layer_norm]
+    )
+    # inbound_layer = inbound_layer + layer_norm
 
     return output, att_weights
 
+
 def get_multiinput_transformer(
-        output_activation,
-        model_config,
-        adam_learning_rate=DEFAULT_ADAM_LEARNING_RATE,
-        adam_decay=DEFAULT_ADAM_DECAY,
-        input_length=INPUT_LENGTH,
-        input_filters=INPUT_FILTERS,
-        input_activation=INPUT_ACTIVATION,
-        output_filters=OUTPUT_FILTERS,
-        output_kernel_size=OUTPUT_KERNEL_SIZE,
-        dilation_rate=DILATION_RATE,
-        output_length=OUTPUT_LENGTH,
-        padding=PADDING,
-        adam_beta_1=ADAM_BETA_1,
-        adam_beta_2=ADAM_BETA_2,
-        dense_b=False,
-        target_scale_factor=1,
-        weights=None
+    output_activation,
+    model_config,
+    adam_learning_rate=DEFAULT_ADAM_LEARNING_RATE,
+    adam_decay=DEFAULT_ADAM_DECAY,
+    input_length=INPUT_LENGTH,
+    input_filters=INPUT_FILTERS,
+    input_activation=INPUT_ACTIVATION,
+    output_filters=OUTPUT_FILTERS,
+    output_kernel_size=OUTPUT_KERNEL_SIZE,
+    dilation_rate=DILATION_RATE,
+    output_length=OUTPUT_LENGTH,
+    padding=PADDING,
+    adam_beta_1=ADAM_BETA_1,
+    adam_beta_2=ADAM_BETA_2,
+    dense_b=False,
+    target_scale_factor=1,
+    weights=None,
 ):
     """
     If weights are provided they will be loaded into created model
@@ -370,9 +418,16 @@ def get_multiinput_transformer(
     filters = input_filters  # redefined in encoder/decoder loops
 
     # Get the conv tower for each branch
-    genome_stem, genome_conv, genome_rconv, genome_maxpool = model_config["GENOME_CONV_TOWER"]
+    genome_stem, genome_conv, genome_rconv, genome_maxpool = model_config[
+        "GENOME_CONV_TOWER"
+    ]
     genome_layer = get_conv_tower_enformer(
-        genome_layer, genome_stem, genome_conv, genome_rconv, genome_maxpool, base_name="genome"
+        genome_layer,
+        genome_stem,
+        genome_conv,
+        genome_rconv,
+        genome_maxpool,
+        base_name="genome",
     )
     atac_stem, atac_conv, atac_rconv, atac_maxpool = model_config["ATAC_CONV_TOWER"]
     atacseq_layer = get_conv_tower_enformer(
@@ -388,23 +443,35 @@ def get_multiinput_transformer(
 
     if not model_config["USE_RPE"]:
         # A positional encoding layer
-        layer = get_positional_encoding(layer, seq_len=seq_len, depth=model_config["EMBEDDING_SIZE"])
+        layer = get_positional_encoding(
+            layer, seq_len=seq_len, depth=model_config["EMBEDDING_SIZE"]
+        )
 
         # Stack a list of encoders
         for i in range(model_config["NUM_MHA"]):
             # The weights are in the shape of (batch_size, num_head, seq_len, seq_len)
-            layer, att_weights = get_multihead_attention_custom(layer, model_config["KEY_DIMS"], model_config["NUM_HEADS"], seq_len, base_name=f"Encoder_{i}")
-            layer = get_feed_forward_nn(layer, model_config["D_FF"], base_name=f"Encoder_{i}")
+            layer, att_weights = get_multihead_attention_custom(
+                layer,
+                model_config["KEY_DIMS"],
+                model_config["NUM_HEADS"],
+                seq_len,
+                base_name=f"Encoder_{i}",
+            )
+            layer = get_feed_forward_nn(
+                layer, model_config["D_FF"], base_name=f"Encoder_{i}"
+            )
 
     else:
         new_rpe_attention_kwargs = deepcopy(model_config["WHOLE_ATTENTION_KWARGS"])
-        new_rpe_attention_kwargs["initializer"] = initializers.get(model_config["WHOLE_ATTENTION_KWARGS"]["initializer"])
+        new_rpe_attention_kwargs["initializer"] = initializers.get(
+            model_config["WHOLE_ATTENTION_KWARGS"]["initializer"]
+        )
         for i in range(model_config["NUM_MHA"]):
             deepmind_transformer_block = TransformerBlock(
                 channels=model_config["EMBEDDING_SIZE"],
                 dropout_rate=model_config["DM_DROPOUT_RATE"],
                 attention_kwargs=new_rpe_attention_kwargs,
-                name=f"Transformer_block_new_{i}"
+                name=f"Transformer_block_new_{i}",
             )
             outputs = deepmind_transformer_block(layer)
             logging.error(f"Length of transformer block output: {len(outputs)}")
@@ -424,7 +491,7 @@ def get_multiinput_transformer(
             dilation_rate=layer_dilation_rate,
             kernel_initializer=KERNEL_INITIALIZER,
             skip_batch_norm=True,
-            n=1
+            n=1,
         )
     else:
         output_layer = get_layer(
@@ -436,19 +503,28 @@ def get_multiinput_transformer(
             dilation_rate=layer_dilation_rate,
             kernel_initializer=KERNEL_INITIALIZER,
             skip_batch_norm=True,
-            n=1
+            n=1,
         )
-    
+
     # Downsampling from 1024 to 32 (change this) for a dynamic change
     seq_len = output_layer.shape[1]
-    strides = ((seq_len - model_config["POOL_SIZE_BEFORE_FLATTEN"] + 1) // output_length) + 1
+    strides = (
+        (seq_len - model_config["POOL_SIZE_BEFORE_FLATTEN"] + 1) // output_length
+    ) + 1
 
-    output_layer = tf.keras.layers.MaxPooling1D(pool_size=model_config["POOL_SIZE_BEFORE_FLATTEN"], strides=strides, padding="valid")(output_layer)
+    output_layer = tf.keras.layers.MaxPooling1D(
+        pool_size=model_config["POOL_SIZE_BEFORE_FLATTEN"],
+        strides=strides,
+        padding="valid",
+    )(output_layer)
     # Depending on the output activation functions, model outputs need to be scaled appropriately
     output_layer = Flatten()(output_layer)
     if dense_b:
-        output_layer = Dense(output_length, activation=output_activation, kernel_initializer='glorot_uniform')(
-            output_layer)
+        output_layer = Dense(
+            output_length,
+            activation=output_activation,
+            kernel_initializer="glorot_uniform",
+        )(output_layer)
 
     logging.debug("Added outputs layer: " + "\n - " + str(output_layer))
 
@@ -460,10 +536,10 @@ def get_multiinput_transformer(
             lr=adam_learning_rate,
             beta_1=adam_beta_1,
             beta_2=adam_beta_2,
-            weight_decay=adam_decay
+            weight_decay=adam_decay,
         ),
         loss=loss_function,
-        metrics=[dice_coef]
+        metrics=[dice_coef],
     )
 
     logging.debug("Model compiled")

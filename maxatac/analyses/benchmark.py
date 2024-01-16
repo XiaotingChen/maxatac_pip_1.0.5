@@ -37,32 +37,43 @@ def run_benchmarking(args):
     output_dir = get_dir(args.output_directory)
 
     # Build the results filename
-    results_filename2 = os.path.join(output_dir, args.prefix + "_" + "r2_spearman_spearman.tsv")
+    results_filename2 = os.path.join(
+        output_dir, args.prefix + "_" + "r2_spearman_spearman.tsv"
+    )
 
     logging.error(
-        "Benchmarking" +
-        "\n  Prediction file:" + args.prediction +
-        "\n  Gold standard file: " + args.gold_standard +
-        "\n  Bin size: " + str(args.bin_size) +
-        "\n  Restricting to chromosomes: \n   - " + "\n   - ".join(args.chromosomes) +
-        "\n  Output directory: " + output_dir
+        "Benchmarking"
+        + "\n  Prediction file:"
+        + args.prediction
+        + "\n  Gold standard file: "
+        + args.gold_standard
+        + "\n  Bin size: "
+        + str(args.bin_size)
+        + "\n  Restricting to chromosomes: \n   - "
+        + "\n   - ".join(args.chromosomes)
+        + "\n  Output directory: "
+        + output_dir
     )
 
     # Calculate the AUPR using the prediction and gold standard
     for chromosome in args.chromosomes:
         logging.error("Benchmarking " + chromosome)
         # Build the results filename
-        results_filename = os.path.join(output_dir,
-                                        args.prefix + "_" + chromosome + "_" + str(args.bin_size) + "bp_PRC.tsv")
+        results_filename = os.path.join(
+            output_dir,
+            args.prefix + "_" + chromosome + "_" + str(args.bin_size) + "bp_PRC.tsv",
+        )
 
-        ChromosomeAUPRC(args.prediction,
-                        args.gold_standard,
-                        args.blacklist,
-                        chromosome,
-                        args.bin_size,
-                        args.agg_function,
-                        results_filename,
-                        args.round_predictions)
+        ChromosomeAUPRC(
+            args.prediction,
+            args.gold_standard,
+            args.blacklist,
+            chromosome,
+            args.bin_size,
+            args.agg_function,
+            results_filename,
+            args.round_predictions,
+        )
 
     # Measure End Time of Training
     stopTime = timeit.default_timer()

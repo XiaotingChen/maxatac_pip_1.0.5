@@ -27,7 +27,6 @@ with Mute():
     from maxatac.analyses.transformer_interpret import run_transformer_interpret
 
 
-
 from maxatac.utilities.phuc_utilities import phuc_func
 from maxatac.utilities.constants import (
     DEFAULT_TRAIN_VALIDATE_CHRS,
@@ -1033,7 +1032,7 @@ def get_parser():
         "--SHUFFLE_AUGMENTATION",
         dest="SHUFFLE_AUGMENTATION",
         action="store",
-        default='peak_centric',
+        default="peak_centric",
         choices=["random", "peak_centric", "no_map"],
         help="Choose preprocessing map",
     )
@@ -1302,7 +1301,6 @@ def get_parser():
         default=False,
         help="If rev_comp, then use the reverse complement in training",
     )
-
 
     #############################################
     # Normalize parser

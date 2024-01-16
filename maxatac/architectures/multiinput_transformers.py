@@ -127,14 +127,14 @@ def get_conv_block(
     regularization=False,
     l1=0.0,
     l2=0.0,
-    override_activation=None
+    override_activation=None,
 ):
     """
     Feed the input through some conv layers.
     This function is very similar to Tareian's get_layer function, with just some slight modification
     """
     for l in range(conv_block_config["num_layer"]):
-        if override_activation==None:
+        if override_activation == None:
             activation = tf.keras.layers.Activation(
                 conv_block_config["activation"], name=base_name + f"_act_{l+1}"
             )
@@ -190,7 +190,7 @@ def get_conv_tower(
     suppress_activation=False,
     pre_activation=False,
     residual_connection_dropout_rate=None,
-    override_activation=None
+    override_activation=None,
 ):
     """
     Feed the input through the tower of conv layers
@@ -211,9 +211,11 @@ def get_conv_tower(
                     suppress_activation=suppress_activation,
                     pre_activation=pre_activation,
                     dropout_rate=residual_connection_dropout_rate,
-                    override_activation=override_activation
+                    override_activation=override_activation,
                 ),
-                activation="relu" if override_activation==None else override_activation
+                activation="relu"
+                if override_activation == None
+                else override_activation,
             )
         else:
             inbound_layer = get_conv_block(
@@ -223,7 +225,7 @@ def get_conv_tower(
                 use_residual=use_residual,
                 suppress_activation=suppress_activation,
                 pre_activation=pre_activation,
-                override_activation=override_activation
+                override_activation=override_activation,
             )
         # print(f"after conv block: {inbound_layer.shape}")
         # After each conv block, use maxpooling to reduce seq len by 2
@@ -278,18 +280,18 @@ class SwiGlu(tf.keras.layers.Layer):
     def __init__(self, beta=1.0, units=None, *args, **kwargs):
         super(SwiGlu, self).__init__(*args, **kwargs)
         self._beta = beta
-        self.units=units
+        self.units = units
 
     def build(self, input_shape):
         self.swish = Swish(beta=self._beta)
         self.W = tf.keras.layers.Dense(
-            units=input_shape[-1] if self.units==None else self.units,
+            units=input_shape[-1] if self.units == None else self.units,
             use_bias=True,
             bias_initializer="glorot_uniform",
             name=f"{self.name}/W_c",
         )
         self.V = tf.keras.layers.Dense(
-            units=input_shape[-1] if self.units==None else self.units,
+            units=input_shape[-1] if self.units == None else self.units,
             use_bias=True,
             bias_initializer="glorot_uniform",
             name=f"{self.name}/V_c",
@@ -589,7 +591,9 @@ def get_multiinput_transformer(
         inbound_layer=genome_layer,
         filters=model_config["CONV_TOWER_CONFIGS_FUSION"]["num_filters"],
         kernel_size=input_kernel_size,
-        activation="relu" if model_config["OVERRIDE_ACTIVATION"]==None else model_config["OVERRIDE_ACTIVATION"],
+        activation="relu"
+        if model_config["OVERRIDE_ACTIVATION"] == None
+        else model_config["OVERRIDE_ACTIVATION"],
         padding=padding,
         dilation_rate=1,
         kernel_initializer=KERNEL_INITIALIZER,
@@ -601,7 +605,9 @@ def get_multiinput_transformer(
         inbound_layer=atacseq_layer1,
         filters=model_config["CONV_TOWER_CONFIGS_FUSION"]["num_filters"],
         kernel_size=input_kernel_size,
-        activation="relu" if model_config["OVERRIDE_ACTIVATION"]==None else model_config["OVERRIDE_ACTIVATION"],
+        activation="relu"
+        if model_config["OVERRIDE_ACTIVATION"] == None
+        else model_config["OVERRIDE_ACTIVATION"],
         padding=padding,
         dilation_rate=1,
         kernel_initializer=KERNEL_INITIALIZER,
@@ -624,7 +630,7 @@ def get_multiinput_transformer(
         ]
         if model_config["SUPPRESS_DROPOUT"] == False
         else None,
-        override_activation=model_config["OVERRIDE_ACTIVATION"]
+        override_activation=model_config["OVERRIDE_ACTIVATION"],
     )
     atacseq_layer = get_conv_tower(
         atacseq_layer2,
@@ -639,7 +645,7 @@ def get_multiinput_transformer(
         ]
         if model_config["SUPPRESS_DROPOUT"] == False
         else None,
-        override_activation=model_config["OVERRIDE_ACTIVATION"]
+        override_activation=model_config["OVERRIDE_ACTIVATION"],
     )
 
     # genome_layer and atacseq_layer now should have shape (batch, seq_len, mha_embed_dim // 2)
@@ -735,7 +741,7 @@ def get_multiinput_transformer(
         regularization=model_config["REGULARIZATION"],
         l1=model_config["ELASTIC_L1"],
         l2=model_config["ELASTIC_L2"],
-        override_activation=model_config["OVERRIDE_ACTIVATION"]
+        override_activation=model_config["OVERRIDE_ACTIVATION"],
     )
 
     # Outputs
@@ -766,16 +772,25 @@ def get_multiinput_transformer(
     #         focal_initializing=model_config["FOCAL_LOSS"],
     #     ) # N, 256, 1
 
-    atacseq_layer1_compressed=tf.keras.layers.Conv1D(filters=32,kernel_size=4,strides=4, padding='valid')(atacseq_layer1) # N, 1024, 16
-    atacseq_layer1_compressed=SwiGlu(units=_prediction_head_config["num_filters"])(atacseq_layer1_compressed)
-    output_layer_weighted=tf.keras.layers.Multiply()([layer,atacseq_layer1_compressed])
-    output_layer=tf.keras.layers.Conv1D(filters=output_filters,
-                                        kernel_size=output_kernel_size,
-                                        activation=output_activation,
-                                        padding=padding,
-                                        dilation_rate=layer_dilation_rate,
-                                        kernel_initializer=KERNEL_INITIALIZER,
-                                        )(output_layer_weighted)
+    atacseq_layer1_compressed = tf.keras.layers.Conv1D(
+        filters=32, kernel_size=4, strides=4, padding="valid"
+    )(
+        atacseq_layer1
+    )  # N, 1024, 16
+    atacseq_layer1_compressed = SwiGlu(units=_prediction_head_config["num_filters"])(
+        atacseq_layer1_compressed
+    )
+    output_layer_weighted = tf.keras.layers.Multiply()(
+        [layer, atacseq_layer1_compressed]
+    )
+    output_layer = tf.keras.layers.Conv1D(
+        filters=output_filters,
+        kernel_size=output_kernel_size,
+        activation=output_activation,
+        padding=padding,
+        dilation_rate=layer_dilation_rate,
+        kernel_initializer=KERNEL_INITIALIZER,
+    )(output_layer_weighted)
 
     # Downsampling from 1024 to 32 (change this) for a dynamic change
     seq_len = output_layer.shape[1]  # should be 256 now
@@ -898,7 +913,7 @@ def get_multiinput_transformer(
                         flanking_truncation_size=model_config[
                             "LOSS_FLANKING_TRUNCATION_SIZE"
                         ],
-                        unknown_coef= model_config['dice_unknown_coef']
+                        unknown_coef=model_config["dice_unknown_coef"],
                     ),
                     name="dice_coef",
                 )
@@ -919,7 +934,7 @@ def get_multiinput_transformer(
                         flanking_truncation_size=model_config[
                             "LOSS_FLANKING_TRUNCATION_SIZE"
                         ],
-                        unknown_coef= model_config['dice_unknown_coef']
+                        unknown_coef=model_config["dice_unknown_coef"],
                     ),
                     name="dice_coef",
                 )

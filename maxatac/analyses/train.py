@@ -36,7 +36,7 @@ with Mute():
         CHIP_sample_weight_adjustment,
         ValidDataGen,
         DataGen,
-        dataset_mapping
+        dataset_mapping,
     )
     from maxatac.utilities.plot import (
         export_binary_metrics,
@@ -47,7 +47,6 @@ with Mute():
     from maxatac.utilities.genome_tools import (
         build_chrom_sizes_dict,
     )
-
 
 
 def run_training(args):
@@ -101,7 +100,6 @@ def run_training(args):
 
     logging.error("Set up model parameters")
 
-
     # Read model config
     with open(args.model_config, "r") as f:
         model_config = json.load(f)
@@ -146,8 +144,10 @@ def run_training(args):
 
     model_config["FULL_TRANSFORMER_OUTPUT"] = args.FULL_TRANSFORMER_OUTPUT
     model_config["OVERRIDE_ACTIVATION"] = args.OVERRIDE_ACTIVATION
-    model_config["SUPPRESS_CELL_TYPE_SPECIFIC_TN_WEIGHTS"] = args.SUPPRESS_CELL_TYPE_SPECIFIC_TN_WEIGHTS
-    model_config['dice_unknown_coef']=args.dice_unknown_coef
+    model_config[
+        "SUPPRESS_CELL_TYPE_SPECIFIC_TN_WEIGHTS"
+    ] = args.SUPPRESS_CELL_TYPE_SPECIFIC_TN_WEIGHTS
+    model_config["dice_unknown_coef"] = args.dice_unknown_coef
 
     # Initialize the model with the architecture of choice
     maxatac_model = MaxATACModel(
@@ -209,7 +209,15 @@ def run_training(args):
 
         # override max epoch when training sample upper bound is available
         if args.training_sample_upper_bound != 0:
-            args.epochs = int(min(args.epochs, int(args.training_sample_upper_bound // (steps_per_epoch_v2 * args.batch_size))))
+            args.epochs = int(
+                min(
+                    args.epochs,
+                    int(
+                        args.training_sample_upper_bound
+                        // (steps_per_epoch_v2 * args.batch_size)
+                    ),
+                )
+            )
 
         # annotate CHIP ROI with additional sample weight adjustment
         train_examples.ROI_pool_CHIP = CHIP_sample_weight_adjustment(
@@ -221,17 +229,14 @@ def run_training(args):
 
     logging.error("Initialize data generator")
 
-
     if args.get_tfds:
         data_meta = pd.DataFrame(
             columns=["train or valid", "tf", "cell_type", "roi_type", "path"]
-
         )
         chr_limit = build_chrom_sizes_dict(
             chrom_sizes_filename=args.chromosome_size_file
         )
         tf = args.meta_file.split("/")[-1].split(".")[0].split("meta_file_")[1]
-
 
         print("Getting valid samples")
         # valid data, only with extended input size
@@ -256,7 +261,11 @@ def run_training(args):
                     dtype=tensorflow.float32,
                 ),
                 tensorflow.TensorSpec(
-                    shape=(OUTPUT_LENGTH + int(np.ceil(args.flanking_size*2/BP_RESOLUTION))), dtype=tensorflow.float32
+                    shape=(
+                        OUTPUT_LENGTH
+                        + int(np.ceil(args.flanking_size * 2 / BP_RESOLUTION))
+                    ),
+                    dtype=tensorflow.float32,
                 ),
                 tensorflow.TensorSpec(shape=(), dtype=tensorflow.float32),
             ),
@@ -292,7 +301,11 @@ def run_training(args):
                     dtype=tensorflow.float32,
                 ),
                 tensorflow.TensorSpec(
-                    shape=(OUTPUT_LENGTH + int(np.ceil(args.flanking_size*2/BP_RESOLUTION))), dtype=tensorflow.float32
+                    shape=(
+                        OUTPUT_LENGTH
+                        + int(np.ceil(args.flanking_size * 2 / BP_RESOLUTION))
+                    ),
+                    dtype=tensorflow.float32,
                 ),
                 tensorflow.TensorSpec(shape=(), dtype=tensorflow.float32),
             ),
@@ -322,7 +335,9 @@ def run_training(args):
                     chr_limit=chr_limit,
                     flanking_padding_size=args.flanking_size,
                     override_shrinkage_factor=True,
-                    suppress_cell_type_TN_weight=model_config["SUPPRESS_CELL_TYPE_SPECIFIC_TN_WEIGHTS"],
+                    suppress_cell_type_TN_weight=model_config[
+                        "SUPPRESS_CELL_TYPE_SPECIFIC_TN_WEIGHTS"
+                    ],
                 ),
                 output_signature=(
                     tensorflow.TensorSpec(
@@ -330,7 +345,11 @@ def run_training(args):
                         dtype=tensorflow.float32,
                     ),
                     tensorflow.TensorSpec(
-                        shape=(OUTPUT_LENGTH + int(np.ceil(args.flanking_size*2/BP_RESOLUTION))), dtype=tensorflow.float32
+                        shape=(
+                            OUTPUT_LENGTH
+                            + int(np.ceil(args.flanking_size * 2 / BP_RESOLUTION))
+                        ),
+                        dtype=tensorflow.float32,
                     ),
                     tensorflow.TensorSpec(shape=(), dtype=tensorflow.float32),
                 ),
@@ -354,7 +373,6 @@ def run_training(args):
         logging.error("Generate tfds completed!")
         sys.exit()
 
-
     # Specify max_que_size
     if args.max_queue_size:
         queue_size = int(args.max_queue_size)
@@ -376,7 +394,6 @@ def run_training(args):
         atac_tfds_file,
         compression="GZIP",
     )
-
 
     # chip
     chip_tfds = []
@@ -415,21 +432,26 @@ def run_training(args):
             train_data_chip = train_data_chip.concatenate(chip_tfds[k])
 
     # re-assign steps_per_epoch_v2 here
-    steps_per_epoch_v2 = int(train_data_chip.cardinality().numpy() // np.ceil(
-        (args.batch_size / (1.0 + float(args.ATAC_Sampling_Multiplier))))
+    steps_per_epoch_v2 = int(
+        train_data_chip.cardinality().numpy()
+        // np.ceil((args.batch_size / (1.0 + float(args.ATAC_Sampling_Multiplier))))
     )
 
     train_data = (
         tensorflow.data.Dataset.sample_from_datasets(
             [
-                train_data_chip
-                .cache()
-                .map(map_func=dataset_mapping[args.SHUFFLE_AUGMENTATION],num_parallel_calls=tensorflow.data.AUTOTUNE)
+                train_data_chip.cache()
+                .map(
+                    map_func=dataset_mapping[args.SHUFFLE_AUGMENTATION],
+                    num_parallel_calls=tensorflow.data.AUTOTUNE,
+                )
                 .shuffle(train_data_chip.cardinality().numpy())
                 .repeat(args.epochs),
-                atac_tfds
-                .cache()
-                .map(map_func=dataset_mapping[args.SHUFFLE_AUGMENTATION],num_parallel_calls=tensorflow.data.AUTOTUNE)
+                atac_tfds.cache()
+                .map(
+                    map_func=dataset_mapping[args.SHUFFLE_AUGMENTATION],
+                    num_parallel_calls=tensorflow.data.AUTOTUNE,
+                )
                 .shuffle(atac_tfds.cardinality().numpy())
                 .repeat(args.epochs),
             ],
@@ -459,8 +481,12 @@ def run_training(args):
             (validate_examples.ROI_pool.shape[0] // args.batch_size) * args.batch_size
         )
         .cache()
-        .map(map_func=dataset_mapping["peak_centric"] if args.SHUFFLE_AUGMENTATION!='no_map' else dataset_mapping[args.SHUFFLE_AUGMENTATION],
-             num_parallel_calls=tensorflow.data.AUTOTUNE) # whether to use non-shuffle validation
+        .map(
+            map_func=dataset_mapping["peak_centric"]
+            if args.SHUFFLE_AUGMENTATION != "no_map"
+            else dataset_mapping[args.SHUFFLE_AUGMENTATION],
+            num_parallel_calls=tensorflow.data.AUTOTUNE,
+        )  # whether to use non-shuffle validation
         .repeat(args.epochs)
         .batch(
             batch_size=args.batch_size,
@@ -477,18 +503,10 @@ def run_training(args):
         args,
         model_config,
         extra={
-            "training CHIP ROI total regions": train_examples.ROI_pool_CHIP.shape[
-                0
-            ],
-            "training ATAC ROI total regions": train_examples.ROI_pool_ATAC.shape[
-                0
-            ],
-            "validate CHIP ROI total regions": validate_examples.ROI_pool_CHIP.shape[
-                0
-            ],
-            "validate ATAC ROI total regions": validate_examples.ROI_pool_ATAC.shape[
-                0
-            ],
+            "training CHIP ROI total regions": train_examples.ROI_pool_CHIP.shape[0],
+            "training ATAC ROI total regions": train_examples.ROI_pool_ATAC.shape[0],
+            "validate CHIP ROI total regions": validate_examples.ROI_pool_CHIP.shape[0],
+            "validate ATAC ROI total regions": validate_examples.ROI_pool_ATAC.shape[0],
             "training CHIP ROI unique regions": train_examples.ROI_pool_unique_region_size_CHIP,
             "training ATAC ROI unique regions": train_examples.ROI_pool_unique_region_size_ATAC,
             "validate CHIP ROI unique regions": validate_examples.ROI_pool_unique_region_size_CHIP,

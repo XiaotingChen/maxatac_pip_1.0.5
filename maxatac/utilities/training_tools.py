@@ -155,7 +155,6 @@ class MaxATACModel(object):
                 model_config=self.model_config,
             )
 
-
         elif self.arch == "DCNN_V2_attention":
             return get_dilated_cnn_with_attention(
                 output_activation=self.output_activation,
@@ -835,7 +834,7 @@ class DataGen:
         flanking_padding_size=512,
         window_size=INPUT_LENGTH,
         override_shrinkage_factor=False,
-        suppress_cell_type_TN_weight=False
+        suppress_cell_type_TN_weight=False,
     ):
         "Initialization"
         self.roi_pool = roi_pool.copy()
@@ -853,7 +852,7 @@ class DataGen:
         self.flanking_padding_size = flanking_padding_size
         self.window_size = window_size
         self.override_shrinkage_factor = override_shrinkage_factor
-        self.suppress_cell_type_TN_weight=suppress_cell_type_TN_weight
+        self.suppress_cell_type_TN_weight = suppress_cell_type_TN_weight
 
         if self.chip == False:
             self.roi_pool["Weight shrinkage factor"] = 1.0 / float(
@@ -960,8 +959,10 @@ class DataGen:
 
             if self.suppress_cell_type_TN_weight:
                 bin_vector_sum = np.sum(bin_vector)
-                if bin_vector_sum==0:
-                    weight_shrinkage_factor=1.0/float(self.chip_sample_weight_baseline) # so this gets sample_weight back to 1 for cell type specific TN samples
+                if bin_vector_sum == 0:
+                    weight_shrinkage_factor = 1.0 / float(
+                        self.chip_sample_weight_baseline
+                    )  # so this gets sample_weight back to 1 for cell type specific TN samples
 
             # Append the sample to the target batch
             # targets_batch.append(bin_vector)
@@ -1728,7 +1729,6 @@ class GenomicRegions(object):
         return df
 
 
-
 def save_metadata(output_dir, args, model_config=None, extra=None):
     """
     Save the metadata every time the model is run
@@ -1804,7 +1804,6 @@ def CHIP_sample_weight_adjustment(CHIP_roi_df):
     ]
 
 
-
 # def peak_centric_map(x, y, w):
 #     return x[512:-512, :], y[16:-16], w
 #
@@ -1840,11 +1839,13 @@ def random_shuffling_map_tf(x, y, w):
         w,
     )
 
-def no_mapping_tf(x,y,w):
-  return x,y,w
+
+def no_mapping_tf(x, y, w):
+    return x, y, w
+
 
 dataset_mapping = {
-    'random': random_shuffling_map_tf,
-    'peak_centric': peak_centric_map_tf,
-    'no_map':no_mapping_tf
+    "random": random_shuffling_map_tf,
+    "peak_centric": peak_centric_map_tf,
+    "no_map": no_mapping_tf,
 }
